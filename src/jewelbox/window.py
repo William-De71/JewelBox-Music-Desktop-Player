@@ -71,6 +71,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
         from gi.repository import Gio
 
         menu = Gio.Menu()
+        menu.append(_('Préférences'), 'app.preferences')
         menu.append(_('À propos de JewelBox'), 'app.about')
         menu.append(_('Quitter'), 'app.quit')
         return menu
