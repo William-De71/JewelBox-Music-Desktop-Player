@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=JewelBox
+Name=JewelBox Music Player
 Comment=Lecteur en streaming pour votre serveur JewelBox Music Library
 Exec=jewelbox
 Icon=io.github.william_de71.JewelBox
