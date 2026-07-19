@@ -15,6 +15,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self.set_size_request(360, 294)
 
         self._stack = Adw.ViewStack()
+        self._pages = {}
         self._add_placeholder_page(
             'home', _('Accueil'), 'user-home-symbolic',
             _('Reprendre l’écoute et suggestions arriveront ici.'))
@@ -58,6 +59,8 @@ class JewelboxWindow(Adw.ApplicationWindow):
         breakpoint.add_setter(header_bar, 'title-widget', narrow_title)
         self.add_breakpoint(breakpoint)
 
+        self._refresh_server_hint()
+
     def _add_placeholder_page(self, name, title, icon_name, description):
         page = Adw.StatusPage(
             title=title,
@@ -65,7 +68,22 @@ class JewelboxWindow(Adw.ApplicationWindow):
             description=description,
         )
         stack_page = self._stack.add_titled_with_icon(page, name, title, icon_name)
+        self._pages[name] = (page, description)
         return stack_page
+
+    def _refresh_server_hint(self):
+        """Sans serveur configuré, les pages guident vers les Préférences ;
+        dès qu'un serveur est là, elles reprennent leur description propre.
+        Appelé à la construction et à la fermeture des Préférences."""
+        app = self.get_application()
+        if app is None:
+            return
+        connected = app.get_client() is not None
+        hint = _('Aucun serveur configuré : ouvrez le menu → Préférences '
+                 '(Ctrl+,) et indiquez l’adresse de votre serveur JewelBox.')
+        for name in ('home', 'library'):
+            page, description = self._pages[name]
+            page.set_description(description if connected else hint)
 
     def _build_main_menu(self):
         from gi.repository import Gio
