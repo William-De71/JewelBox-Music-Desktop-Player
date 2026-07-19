@@ -88,8 +88,11 @@ class JewelboxApplication(Adw.Application):
 
     def _load_css(self):
         provider = Gtk.CssProvider()
+        resource_path = f'{RESOURCE_PREFIX}/style.css'
         try:
-            provider.load_from_resource(f'{RESOURCE_PREFIX}/style.css')
+            # load_from_resource ne lève pas GLib.Error si la ressource
+            # manque (simple warning) : on vérifie l'existence d'abord.
+            Gio.resources_get_info(resource_path, Gio.ResourceLookupFlags.NONE)
         except GLib.Error:
             # Mode développement : le gresource n'est pas compilé,
             # on charge le fichier source directement.
@@ -97,6 +100,8 @@ class JewelboxApplication(Adw.Application):
             if not css_file.exists():
                 return
             provider.load_from_path(str(css_file))
+        else:
+            provider.load_from_resource(resource_path)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             provider,
