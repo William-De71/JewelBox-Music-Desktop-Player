@@ -24,7 +24,7 @@ Dépendances Fedora :
 
 ```bash
 sudo dnf install meson ninja-build blueprint-compiler flatpak-builder \
-    python3-gobject gtk4-devel libadwaita-devel
+    python3-gobject gtk4-devel libadwaita-devel python3-pytest python3-pytest-cov
 flatpak install flathub org.gnome.Sdk//50
 ```
 
@@ -41,11 +41,19 @@ flatpak-builder --user --install --force-clean build/ io.github.william_de71.Jew
 flatpak run io.github.william_de71.JewelBox
 ```
 
-Tests (logique pure uniquement, sans GTK) :
+Tests (logique pure uniquement, sans GTK) avec la gate de couverture
+(min 95 %, la même que la CI applique sur chaque PR) :
 
 ```bash
-pytest tests/
+pytest --cov
 ```
+
+## Contribuer
+
+Pas de commit direct sur `main` : une branche par fonctionnalité/correctif,
+PR obligatoire. La CI exécute les tests avec gate de couverture 95 % (rapport
+sur la PR) et valide le build Meson. Un tag `v*.*.*` déclenche le build du
+bundle Flatpak et sa publication en release GitHub.
 
 ## Architecture
 

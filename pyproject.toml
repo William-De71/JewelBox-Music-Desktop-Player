@@ -1,0 +1,24 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/jewelbox"]
+# Le code frontière GTK/GStreamer/D-Bus (fenêtres, playbin, MPRIS, Avahi,
+# client libsoup) s'exerce à la main sur le bureau, pas en CI headless.
+# Toute la logique restante doit être couverte à 95 % minimum.
+omit = [
+    "src/jewelbox/__main__.py",
+    "src/jewelbox/main.py",
+    "src/jewelbox/window.py",
+    "src/jewelbox/ui/*",
+    "src/jewelbox/api/client.py",
+    "src/jewelbox/playback/player.py",
+    "src/jewelbox/playback/mpris.py",
+    "src/jewelbox/discovery/*",
+]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+precision = 1

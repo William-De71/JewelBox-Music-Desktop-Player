@@ -1,0 +1,47 @@
+name: Release Flatpak
+run-name: Release JewelBox Music Desktop Player ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build Flatpak bundle and create release
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Build Flatpak bundle
+        uses: flathub-infra/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: JewelBox-Music-Desktop-Player-${{ github.ref_name }}.flatpak
+          manifest-path: io.github.william_de71.JewelBox.json
+          cache-key: flatpak-builder-${{ github.sha }}
+          upload-artifact: false
+
+      - name: 🚀 Create GitHub Release with Flatpak bundle
+        uses: softprops/action-gh-release@v2
+        with:
+          files: JewelBox-Music-Desktop-Player-*.flatpak
+          generate_release_notes: true
+          body: |
+            ## 🖥️ JewelBox Music Desktop Player ${{ github.ref_name }}
+
+            Bundle Flatpak prêt à installer (Linux x86_64, runtime GNOME 50).
+
+            ### Installation
+            ```bash
+            flatpak install flathub org.gnome.Platform//50   # si absent
+            flatpak install --user JewelBox-Music-Desktop-Player-${{ github.ref_name }}.flatpak
+            flatpak run io.github.william_de71.JewelBox
+            ```
