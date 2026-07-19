@@ -2,6 +2,8 @@ from gettext import gettext as _
 
 from gi.repository import Adw, Gtk
 
+from jewelbox.ui.library import LibraryPage
+
 
 class JewelboxWindow(Adw.ApplicationWindow):
     """Fenêtre principale : 4 onglets (Accueil, Bibliothèque, Recherche,
@@ -19,9 +21,10 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self._add_placeholder_page(
             'home', _('Accueil'), 'user-home-symbolic',
             _('Reprendre l’écoute et suggestions arriveront ici.'))
-        self._add_placeholder_page(
-            'library', _('Bibliothèque'), 'media-optical-symbolic',
-            _('La grille des albums de votre serveur arrivera ici.'))
+        self._library = LibraryPage(self.get_application())
+        self._stack.add_titled_with_icon(
+            self._library, 'library', _('Bibliothèque'),
+            'media-optical-symbolic')
         self._add_placeholder_page(
             'search', _('Recherche'), 'system-search-symbolic',
             _('La recherche dans la bibliothèque arrivera ici.'))
@@ -72,8 +75,9 @@ class JewelboxWindow(Adw.ApplicationWindow):
         return stack_page
 
     def _refresh_server_hint(self):
-        """Sans serveur configuré, les pages guident vers les Préférences ;
-        dès qu'un serveur est là, elles reprennent leur description propre.
+        """Sans serveur configuré, l'accueil guide vers les Préférences ;
+        dès qu'un serveur est là, il reprend sa description propre. La
+        bibliothèque gère ses propres états mais se recharge au même moment.
         Appelé à la construction et à la fermeture des Préférences."""
         app = self.get_application()
         if app is None:
@@ -81,9 +85,9 @@ class JewelboxWindow(Adw.ApplicationWindow):
         connected = app.get_client() is not None
         hint = _('Aucun serveur configuré : ouvrez le menu → Préférences '
                  '(Ctrl+,) et indiquez l’adresse de votre serveur JewelBox.')
-        for name in ('home', 'library'):
-            page, description = self._pages[name]
-            page.set_description(description if connected else hint)
+        page, description = self._pages['home']
+        page.set_description(description if connected else hint)
+        self._library.reload()
 
     def _build_main_menu(self):
         from gi.repository import Gio

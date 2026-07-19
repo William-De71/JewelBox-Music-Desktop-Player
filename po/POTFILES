@@ -3,4 +3,5 @@ data/io.github.william_de71.JewelBox.metainfo.xml.in
 data/io.github.william_de71.JewelBox.gschema.xml
 src/jewelbox/main.py
 src/jewelbox/window.py
+src/jewelbox/ui/library.py
 src/jewelbox/ui/preferences.py
