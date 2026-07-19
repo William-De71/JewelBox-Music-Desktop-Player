@@ -1,0 +1,107 @@
+name: Pull request checks
+run-name: PR checks ${{ github.head_ref }}
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Unit tests & coverage (95%)
+    runs-on: ubuntu-latest
+    # Needed by the sticky coverage comment below.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 📦 Install test dependencies
+        run: pip install pytest pytest-cov
+
+      - name: ✅ Run tests with coverage gate (min 95% on logic)
+        run: python -m pytest --cov --cov-report=term --cov-report=html --cov-report=xml
+
+      # The coverage table, readable without downloading anything: on the run's
+      # summary page, and as a sticky comment kept up to date on the PR.
+      - name: 📝 Coverage summary (run page)
+        if: always()
+        run: |
+          if python -m coverage report --format=markdown > coverage-summary.md 2>/dev/null; then
+            cat coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '⚠️ Rapport de couverture indisponible (les tests ont probablement échoué avant).' > coverage-summary.md
+            cat coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 💬 Coverage comment (PR, sticky)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- pytest-coverage -->';
+            let table;
+            try {
+              table = fs.readFileSync('coverage-summary.md', 'utf8');
+            } catch {
+              table = '⚠️ Rapport de couverture indisponible (les tests ont probablement échoué avant).';
+            }
+            const body = `${marker}\n${table}`;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+            }
+
+      # Test and coverage reports, downloadable from the run page — also on failure,
+      # which is precisely when they matter.
+      - name: ↗️ Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            htmlcov
+            coverage.xml
+          retention-days: 7
+
+  build:
+    name: Meson build & validation
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build libglib2.0-dev-bin libglib2.0-bin \
+            gettext desktop-file-utils appstream
+
+      - name: 🏗️ Meson setup & compile
+        run: |
+          meson setup build
+          meson compile -C build
+
+      # Validates the .desktop file and the GSettings schema (the pytest suite
+      # already ran with the coverage gate in the previous job).
+      - name: ✅ Meson tests
+        run: meson test -C build --print-errorlogs
+
+      - name: 📄 Validate AppStream metainfo
+        run: appstreamcli validate --no-net build/data/io.github.william_de71.JewelBox.metainfo.xml
