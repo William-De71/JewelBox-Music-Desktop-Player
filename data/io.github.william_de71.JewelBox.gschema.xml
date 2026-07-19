@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="jewelbox">
+  <schema id="io.github.william_de71.JewelBox" path="/io/github/william_de71/JewelBox/">
+    <key name="server-url" type="s">
+      <default>''</default>
+      <summary>Adresse du serveur JewelBox</summary>
+      <description>URL de base normalisée du serveur, ex. http://192.168.1.10:3001</description>
+    </key>
+    <key name="server-id" type="s">
+      <default>''</default>
+      <summary>Identifiant stable du serveur enregistré</summary>
+      <description>UUID exposé par /api/server-info, survit aux changements d'adresse IP</description>
+    </key>
+    <key name="device-id" type="s">
+      <default>''</default>
+      <summary>Identifiant de cet appareil</summary>
+      <description>UUID généré au premier lancement, envoyé en X-Device-Id, jamais régénéré</description>
+    </key>
+    <key name="sort-order" type="s">
+      <choices>
+        <choice value="artist"/>
+        <choice value="year"/>
+      </choices>
+      <default>'artist'</default>
+      <summary>Tri de la bibliothèque</summary>
+    </key>
+    <key name="group-by-artist" type="b">
+      <default>false</default>
+      <summary>Grouper la bibliothèque par artiste</summary>
+    </key>
+  </schema>
+</schemalist>

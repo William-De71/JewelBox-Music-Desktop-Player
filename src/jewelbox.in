@@ -1,0 +1,31 @@
+#!@PYTHON@
+# Lanceur installé par Meson ; les @variables@ sont remplacées à la configuration.
+import gettext
+import locale
+import os
+import signal
+import sys
+
+VERSION = '@VERSION@'
+PKGDATADIR = '@pkgdatadir@'
+LOCALEDIR = '@localedir@'
+
+sys.path.insert(1, PKGDATADIR)
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+try:
+    locale.bindtextdomain('jewelbox', LOCALEDIR)
+    locale.textdomain('jewelbox')
+except AttributeError:
+    pass
+gettext.install('jewelbox', LOCALEDIR)
+
+if __name__ == '__main__':
+    from gi.repository import Gio
+
+    resource = Gio.Resource.load(os.path.join(PKGDATADIR, 'jewelbox.gresource'))
+    resource._register()
+
+    from jewelbox import main
+
+    sys.exit(main.main(VERSION))

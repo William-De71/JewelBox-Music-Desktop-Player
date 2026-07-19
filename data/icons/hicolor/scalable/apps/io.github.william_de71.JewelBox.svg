@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Icône provisoire : boîtier + disque. À remplacer en phase 11. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c061cb"/>
+      <stop offset="1" stop-color="#613583"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="20" fill="url(#bg)"/>
+  <circle cx="64" cy="64" r="38" fill="#ffffff" fill-opacity="0.92"/>
+  <circle cx="64" cy="64" r="37" fill="none" stroke="#613583" stroke-opacity="0.25" stroke-width="2"/>
+  <circle cx="64" cy="64" r="24" fill="none" stroke="#c061cb" stroke-opacity="0.35" stroke-width="3"/>
+  <circle cx="64" cy="64" r="12" fill="#613583"/>
+  <circle cx="64" cy="64" r="5" fill="#f6edf7"/>
+</svg>

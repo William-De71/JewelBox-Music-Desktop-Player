@@ -1,0 +1,7 @@
+/* Ajustements de style de JewelBox.
+   Chargé depuis le gresource par JewelboxApplication. */
+
+/* Pistes sans fichier audio : estompées (parité Android, alpha 38 %). */
+.track-unavailable {
+  opacity: 0.38;
+}

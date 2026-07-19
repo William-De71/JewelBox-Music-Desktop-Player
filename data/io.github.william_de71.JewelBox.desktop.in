@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=JewelBox
+Comment=Lecteur en streaming pour votre serveur JewelBox Music Library
+Exec=jewelbox
+Icon=io.github.william_de71.JewelBox
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;GNOME;GTK;
+Keywords=musique;music;player;streaming;jewelbox;
+StartupNotify=true
