@@ -144,6 +144,21 @@ class JewelBoxClient:
         """Résout une cover_url relative (/covers/…) contre ce serveur."""
         return server_url.resolve_url(self.base_url, cover_url)
 
+    async def fetch_bytes(self, url: str) -> bytes:
+        """Télécharge une ressource brute (pochette) ; ApiError en cas d'échec."""
+        message = Soup.Message.new('GET', url)
+        if message is None:
+            raise ApiError(f'URL invalide : {url}')
+        try:
+            response = await self._session.send_and_read_async(
+                message, GLib.PRIORITY_DEFAULT, None)
+        except GLib.Error as error:
+            raise ApiError(f'{url} : {error.message}') from error
+        status = message.get_status()
+        if not 200 <= status < 300:
+            raise ApiError(f'{url} : {status}', status=status)
+        return response.get_data() or b''
+
     async def mark_played(self, track_id: int) -> None:
         """Compteur local (play_count/last_played_at), indépendant de Last.fm."""
         await self._post(f'/api/player/tracks/{track_id}/played')

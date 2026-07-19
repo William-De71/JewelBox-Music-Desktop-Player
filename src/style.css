@@ -5,3 +5,10 @@
 .track-unavailable {
   opacity: 0.38;
 }
+
+/* Pochettes de la grille : coins arrondis et fond neutre en attendant
+   l'image (parité carte Android : coins 6dp, fond secondaryContainer). */
+.jewelbox-cover {
+  border-radius: 6px;
+  background-color: alpha(currentColor, 0.1);
+}
