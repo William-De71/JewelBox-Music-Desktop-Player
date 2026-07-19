@@ -59,7 +59,7 @@ class JewelboxApplication(Adw.Application):
         self.settings = None
         self.device_id = ''
         self._client = None
-        GLib.set_application_name('JewelBox')
+        GLib.set_application_name('JewelBox Music Player')
 
         self._add_action('quit', lambda *_a: self.quit(), ['<primary>q'])
         self._add_action('preferences', self._on_preferences,
@@ -140,7 +140,7 @@ class JewelboxApplication(Adw.Application):
 
     def _on_about(self, *_args):
         dialog = Adw.AboutDialog(
-            application_name='JewelBox',
+            application_name='JewelBox Music Player',
             application_icon=APP_ID,
             developer_name='William Deren',
             version=self.version,

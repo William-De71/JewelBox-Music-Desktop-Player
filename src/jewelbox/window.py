@@ -12,7 +12,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.set_title('JewelBox')
+        self.set_title('JewelBox Music Player')
         self.set_default_size(1000, 700)
         self.set_size_request(360, 294)
 
@@ -55,6 +55,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # Fenêtre étroite : le commutateur descend en barre du bas et le
         # titre reprend sa place dans la barre d'en-tête. (On ne peut pas
         # passer None à add_setter depuis Python, d'où le Adw.WindowTitle.)
+        # En fenêtre étroite le nom complet serait tronqué : forme courte.
         narrow_title = Adw.WindowTitle(title='JewelBox')
         breakpoint = Adw.Breakpoint.new(
             Adw.BreakpointCondition.parse('max-width: 550sp'))
