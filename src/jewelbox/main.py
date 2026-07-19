@@ -13,6 +13,7 @@ import gi.events  # noqa: E402
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from jewelbox import APP_ID, RESOURCE_PREFIX  # noqa: E402
+from jewelbox.api.client import JewelBoxClient  # noqa: E402
 from jewelbox.core.device import ensure_device_id  # noqa: E402
 from jewelbox.window import JewelboxWindow  # noqa: E402
 
@@ -57,6 +58,7 @@ class JewelboxApplication(Adw.Application):
         self.version = version
         self.settings = None
         self.device_id = ''
+        self._client = None
         GLib.set_application_name('JewelBox')
 
         self._add_action('quit', lambda *_a: self.quit(), ['<primary>q'])
@@ -108,11 +110,33 @@ class JewelboxApplication(Adw.Application):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
+    def get_client(self):
+        """Client API partagé, (re)construit paresseusement depuis les réglages.
+
+        Renvoie None tant qu'aucun serveur valide n'est configuré. Tiré à
+        chaque accès plutôt que câblé sur un signal GSettings : les pages
+        voient ainsi tout changement d'adresse, y compris avec le repli
+        mémoire du mode développement.
+        """
+        url = self.settings.get_string('server-url') if self.settings else ''
+        if not url:
+            self._client = None
+        elif self._client is None or self._client.base_url != url:
+            try:
+                self._client = JewelBoxClient(url, device_id=self.device_id)
+            except ValueError:
+                self._client = None
+        return self._client
+
     def _on_preferences(self, *_args):
         from jewelbox.ui.preferences import PreferencesDialog
 
+        window = self.props.active_window
         dialog = PreferencesDialog(self.settings, self.device_id)
-        dialog.present(self.props.active_window)
+        if window is not None and hasattr(window, '_refresh_server_hint'):
+            dialog.connect('closed',
+                           lambda *_a: window._refresh_server_hint())
+        dialog.present(window)
 
     def _on_about(self, *_args):
         dialog = Adw.AboutDialog(

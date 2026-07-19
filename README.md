@@ -48,6 +48,22 @@ Tests (logique pure uniquement, sans GTK) avec la gate de couverture
 pytest --cov
 ```
 
+### Raccourcis Make
+
+Un `Makefile` regroupe les commandes du quotidien (`make help` pour la liste) :
+
+| Commande | Action |
+|---|---|
+| `make test` | tests + gate de couverture 95 % (identique à la CI) |
+| `make run` | lance l'app en mode dev en **rendu logiciel** (`GSK_RENDERER=cairo`) |
+| `make run-gpu` | lance l'app en mode dev en rendu GPU normal |
+| `make server` | démarre le serveur JewelBox local sur `:3001` (clone attendu dans `../JewelBox-Music-Library`, surchargable : `make server SERVER_DIR=…`) |
+| `make flatpak` | build + installation + lancement du Flatpak |
+
+`make run` existe parce qu'un pilote graphique instable peut figer la machine
+au sondage GL du démarrage (vécu avec `nouveau`) : le rendu logiciel permet de
+tester l'app sans toucher au GPU. Avec un pilote sain, `make run-gpu`.
+
 ## Contribuer
 
 Pas de commit direct sur `main` : une branche par fonctionnalité/correctif,
