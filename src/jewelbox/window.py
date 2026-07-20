@@ -3,6 +3,7 @@ from gettext import gettext as _
 from gi.repository import Adw, Gtk
 
 from jewelbox.ui.library import LibraryPage
+from jewelbox.ui.no_server_page import build_no_server_page
 
 
 class JewelboxWindow(Adw.ApplicationWindow):
@@ -66,28 +67,36 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self._refresh_server_hint()
 
     def _add_placeholder_page(self, name, title, icon_name, description):
-        page = Adw.StatusPage(
+        """Onglet pas encore développé : bascule entre son propre
+        Adw.StatusPage et la page « aucun serveur configuré » commune, pour
+        un rendu identique à celui de la Bibliothèque sur tous les onglets."""
+        content_page = Adw.StatusPage(
             title=title,
             icon_name=icon_name,
             description=description,
         )
-        stack_page = self._stack.add_titled_with_icon(page, name, title, icon_name)
-        self._pages[name] = (page, description)
+        no_server_page = build_no_server_page()
+
+        tab_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        tab_stack.add_named(content_page, 'content')
+        tab_stack.add_named(no_server_page, 'no-server')
+
+        stack_page = self._stack.add_titled_with_icon(
+            tab_stack, name, title, icon_name)
+        self._pages[name] = tab_stack
         return stack_page
 
     def _refresh_server_hint(self):
-        """Sans serveur configuré, l'accueil guide vers les Préférences ;
-        dès qu'un serveur est là, il reprend sa description propre. La
-        bibliothèque gère ses propres états mais se recharge au même moment.
+        """Sans serveur configuré, chaque onglet non développé bascule vers
+        la même page « Aucun serveur configuré » que la Bibliothèque, qui
+        gère ses propres états et se recharge au même moment.
         Appelé à la construction et à la fermeture des Préférences."""
         app = self.get_application()
         if app is None:
             return
         connected = app.get_client() is not None
-        hint = _('Aucun serveur configuré : ouvrez le menu → Préférences '
-                 '(Ctrl+,) et indiquez l’adresse de votre serveur JewelBox.')
-        page, description = self._pages['home']
-        page.set_description(description if connected else hint)
+        for tab_stack in self._pages.values():
+            tab_stack.set_visible_child_name('content' if connected else 'no-server')
         self._library.reload()
 
     def _build_main_menu(self):
