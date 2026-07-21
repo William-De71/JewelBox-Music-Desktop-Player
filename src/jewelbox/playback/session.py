@@ -71,6 +71,7 @@ class PlaybackSession:
         self._player = Player()
         self._player.on_position = self._on_position
         self._player.on_track_ended = self._on_track_ended
+        self._player.on_stream_started = self._on_stream_started
         self._player.on_about_to_finish = self._on_about_to_finish
         self._player.on_error = self._on_error
         self._player.on_state_changed = lambda _playing: self._publish()
@@ -83,10 +84,13 @@ class PlaybackSession:
         self.on_state_changed = None
         self._last_error: str | None = None
         # Posé par _on_about_to_finish quand playbin3 a déjà reçu l'URI
-        # suivante (enchaînement gapless) : l'EOS qui suit ne doit alors que
-        # faire avancer la file, sans recharger le player (déjà en train de
-        # jouer la bonne piste) ni redemander now_playing en double.
-        self._gapless_next_started = False
+        # suivante (enchaînement gapless) : le STREAM_START qui suit doit
+        # alors faire avancer la file sans recharger le player (déjà en train
+        # de jouer la bonne piste). Décrémenté par _on_stream_started.
+        self._pending_gapless = 0
+        # Ignore le tout premier STREAM_START, celui du load initial : la file
+        # est déjà positionnée sur la bonne piste, rien à avancer.
+        self._stream_started_once = False
 
     # ── Démarrage d'une lecture ──────────────────────────────────────────────
 
@@ -130,6 +134,10 @@ class PlaybackSession:
         current = self._queue.state().current
         if current is None:
             return
+        # Chargement direct : le STREAM_START qui suivra correspond à cette
+        # piste-ci (déjà courante dans la file), pas à un enchaînement gapless.
+        self._pending_gapless = 0
+        self._stream_started_once = False
         self._player.load(current.stream_url, play=True)
         self._scrobbler.track_started(current.track_id)
         self._run(client.now_playing(current.track_id))
@@ -202,6 +210,10 @@ class PlaybackSession:
             self._publish(state)
             return
         if not already_playing:
+            # Saut explicite (suivant/précédent) : chargement direct, le
+            # prochain STREAM_START ne doit pas re-avancer la file.
+            self._pending_gapless = 0
+            self._stream_started_once = False
             self._player.load(current.stream_url, play=True)
         self._scrobbler.track_started(current.track_id)
         client = self._get_client()
@@ -229,17 +241,34 @@ class PlaybackSession:
         except ApiError:
             pass
 
-    def _on_track_ended(self):
-        already_playing = self._gapless_next_started
-        self._gapless_next_started = False
+    def _on_stream_started(self):
+        """Nouveau flux démarré. En gapless (about-to-finish a fourni l'URI
+        suivante), c'est ici — et non à l'EOS, qui ne survient plus — que la
+        file avance et que l'UI se met à jour sur la nouvelle piste. Le tout
+        premier STREAM_START (load initial) et ceux des sauts explicites sont
+        ignorés : la file est déjà sur la bonne piste."""
+        if not self._stream_started_once:
+            self._stream_started_once = True
+            return
+        if self._pending_gapless <= 0:
+            return
+        self._pending_gapless -= 1
         state = self._queue.track_ended()
-        self._load_from_state(state, already_playing=already_playing)
+        # already_playing : playbin3 joue déjà le bon flux, on ne recharge pas.
+        self._load_from_state(state, already_playing=True)
+
+    def _on_track_ended(self):
+        """EOS : atteint seulement quand aucune URI suivante n'avait été
+        fournie (dernière piste, ou file épuisée). L'enchaînement gapless,
+        lui, passe par _on_stream_started."""
+        state = self._queue.track_ended()
+        self._load_from_state(state, already_playing=False)
 
     def _on_about_to_finish(self):
         """playbin3 va manquer de données : lui donner tout de suite l'URI
-        suivante pour un enchaînement sans coupure (l'EOS qui suivra ne fera
-        alors qu'avancer la file, sans recharger un player déjà en train de
-        jouer la bonne piste — voir _on_track_ended)."""
+        suivante pour un enchaînement sans coupure. Le STREAM_START qui suivra
+        fera avancer la file (voir _on_stream_started) ; si aucune URI n'est
+        fournie, c'est un EOS qui clôturera (voir _on_track_ended)."""
         peek = self._queue.state()
         if peek.repeat.value == 'one':
             current = peek.current
@@ -248,7 +277,8 @@ class PlaybackSession:
             upcoming = self._peek_next(peek)
             uri = upcoming.stream_url if upcoming else None
         self._player.set_next_uri(uri)
-        self._gapless_next_started = uri is not None
+        if uri is not None:
+            self._pending_gapless += 1
 
     def _peek_next(self, state):
         items = state.items

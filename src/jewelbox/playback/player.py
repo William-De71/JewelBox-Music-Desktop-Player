@@ -28,6 +28,7 @@ class Player:
     chacune — ce module n'a qu'un appelant, playback/session.py) :
       - on_position(position_seconds, duration_seconds)
       - on_track_ended()           piste jouée jusqu'au bout (EOS)
+      - on_stream_started()        nouveau flux démarré (enchaînement gapless)
       - on_about_to_finish()       à appeler juste avant, pour enchaîner
       - on_error(message)          échec de lecture (réseau, format...)
       - on_state_changed(playing) bascule play/pause détectée par le bus
@@ -52,6 +53,7 @@ class Player:
 
         self.on_position = None
         self.on_track_ended = None
+        self.on_stream_started = None
         self.on_about_to_finish = None
         self.on_error = None
         self.on_state_changed = None
@@ -118,6 +120,13 @@ class Player:
             self._stop_position_polling()
             if self.on_track_ended:
                 self.on_track_ended()
+        elif message.type == Gst.MessageType.STREAM_START:
+            # En enchaînement gapless (about-to-finish), playbin3 passe au
+            # flux suivant SANS émettre d'EOS : ce message est le seul signal
+            # qu'une nouvelle piste a commencé. Le premier STREAM_START (celui
+            # du load initial) est filtré côté session.
+            if self.on_stream_started:
+                self.on_stream_started()
         elif message.type == Gst.MessageType.ERROR:
             error, debug = message.parse_error()
             if self.on_error:

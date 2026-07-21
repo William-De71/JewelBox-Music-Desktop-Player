@@ -42,6 +42,17 @@ class JewelboxWindow(Adw.ApplicationWindow):
         )
         header_bar = Adw.HeaderBar(title_widget=switcher)
 
+        # Le sélecteur d'onglets reste visible sur toutes les pages, y compris
+        # la fiche album empilée par-dessus. Comme le header vit dans le
+        # ToolbarView externe (au-dessus du NavigationView), la barre interne
+        # d'une page poussée n'apparaît pas : ce bouton retour explicite,
+        # révélé seulement quand une page est empilée, dépile le NavigationView.
+        self._back_button = Gtk.Button(
+            icon_name='go-previous-symbolic', visible=False,
+            tooltip_text=_('Retour'))
+        self._back_button.connect('clicked', lambda *_a: self._nav.pop())
+        header_bar.pack_start(self._back_button)
+
         menu_button = Gtk.MenuButton(
             icon_name='open-menu-symbolic',
             tooltip_text=_('Menu principal'),
@@ -54,7 +65,16 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # doivent rester visibles sur toutes les pages, donc ils vivent dans
         # le ToolbarView externe, pas dans la page racine du NavigationView.
         self._nav = Adw.NavigationView()
-        self._nav.add(Adw.NavigationPage(child=self._stack, title='JewelBox'))
+        self._root_page = Adw.NavigationPage(child=self._stack, title='JewelBox')
+        self._nav.add(self._root_page)
+        # Le bouton retour n'apparaît que hors de la page racine (une fiche
+        # album empilée). Esc pour dépiler est déjà géré par le NavigationView.
+        self._nav.connect('notify::visible-page', self._on_nav_page_changed)
+
+        # Changer d'onglet depuis une fiche album empilée : le ViewStack bascule
+        # en arrière-plan sous la fiche, sans effet visible. On dépile jusqu'à
+        # la racine pour révéler l'onglet choisi.
+        self._stack.connect('notify::visible-child', self._on_tab_changed)
 
         self._switcher_bar = Adw.ViewSwitcherBar(stack=self._stack)
         self._player_bar = PlayerBar(self.get_application())
@@ -110,6 +130,19 @@ class JewelboxWindow(Adw.ApplicationWindow):
         for tab_stack in self._pages.values():
             tab_stack.set_visible_child_name('content' if connected else 'no-server')
         self._library.reload()
+
+    def _on_tab_changed(self, *_args):
+        # pop_to_page(racine) est un no-op si on y est déjà : sûr à appeler à
+        # chaque changement d'onglet.
+        self._nav.pop_to_page(self._root_page)
+
+    def _on_nav_page_changed(self, *_args):
+        # get_previous_page renvoie None quand la page visible est la racine :
+        # dans ce cas il n'y a rien à dépiler, on masque le bouton retour.
+        visible = self._nav.get_visible_page()
+        can_go_back = (visible is not None
+                       and self._nav.get_previous_page(visible) is not None)
+        self._back_button.set_visible(can_go_back)
 
     def _open_album(self, album_id: int):
         page = AlbumDetailPage(self.get_application(), album_id)
