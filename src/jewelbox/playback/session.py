@@ -277,27 +277,15 @@ class PlaybackSession:
         suivante pour un enchaînement sans coupure. Le STREAM_START qui suivra
         fera avancer la file (voir _on_stream_started) ; si aucune URI n'est
         fournie, c'est un EOS qui clôturera (voir _on_track_ended)."""
-        peek = self._queue.state()
-        if peek.repeat.value == 'one':
-            current = peek.current
-            uri = current.stream_url if current else None
-        else:
-            upcoming = self._peek_next(peek)
-            uri = upcoming.stream_url if upcoming else None
+        # La file décide de la piste suivante dans l'ordre de LECTURE : ainsi
+        # l'URI préchargée est exactement celle que track_ended() rendra
+        # courante au prochain STREAM_START (pas de décalage audio/affichage
+        # en mode aléatoire). peek_next() gère aussi le mode ONE (rejoue).
+        upcoming = self._queue.peek_next()
+        uri = upcoming.stream_url if upcoming else None
         self._player.set_next_uri(uri)
         if uri is not None:
             self._pending_gapless += 1
-
-    def _peek_next(self, state):
-        items = state.items
-        if not items or state.current_index is None:
-            return None
-        index = state.current_index
-        if index < len(items) - 1:
-            return items[index + 1]
-        if state.repeat.value == 'all':
-            return items[0]
-        return None
 
     def _on_error(self, message):
         self._last_error = message
