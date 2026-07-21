@@ -177,6 +177,29 @@ class LibraryPage(Gtk.Stack):
         if item is not None and self.on_album_activated is not None:
             self.on_album_activated(item.album.id)
 
+    def _on_card_play_clicked(self, _button, list_item):
+        # Les albums de la grille ne portent que leurs métadonnées (pas les
+        # pistes : client.albums() ne les inclut pas). On charge donc l'album
+        # complet avant de lancer sa lecture.
+        item = list_item.get_item()
+        if item is None:
+            return
+        task = self._play_album(item.album.id)
+        asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+    async def _play_album(self, album_id):
+        client = self._app.get_client()
+        playback = self._app.playback
+        if client is None or playback is None:
+            return
+        try:
+            album = await client.album(album_id)
+        except ApiError:
+            return  # best-effort, comme le reste de l'app
+        first = next((t for t in album.tracks if t.has_file), None)
+        if first is not None:
+            playback.play_album(album, first.id)
+
     def _on_status_clicked(self, _button):
         if self._status_action:
             self.activate_action(self._status_action, None)
@@ -207,6 +230,21 @@ class LibraryPage(Gtk.Stack):
         )
         cover.add_css_class('jewelbox-cover')
 
+        # Bouton rond bleu « Lire l'album » posé en surimpression sur la
+        # pochette (parité avec le bouton play flottant des cartes Android).
+        # Un clic dessus lance l'album ; il ne remonte pas jusqu'à la carte,
+        # donc l'ouverture de la fiche (simple clic) n'est pas déclenchée.
+        play = Gtk.Button(
+            icon_name='media-playback-start-symbolic',
+            halign=Gtk.Align.END, valign=Gtk.Align.END,
+            margin_end=6, margin_bottom=6,
+            tooltip_text=_('Lire l’album'),
+            css_classes=['circular', 'jewelbox-cover-play'])
+        play.connect('clicked', self._on_card_play_clicked, list_item)
+
+        overlay = Gtk.Overlay(child=cover, halign=Gtk.Align.CENTER)
+        overlay.add_overlay(play)
+
         title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END,
                           max_width_chars=18,
                           css_classes=['caption-heading'])
@@ -216,19 +254,25 @@ class LibraryPage(Gtk.Stack):
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
                        width_request=160, halign=Gtk.Align.CENTER)
-        card.append(cover)
+        card.append(overlay)
         card.append(title)
         card.append(artist)
 
         list_item.set_child(card)
         list_item.cover, list_item.title, list_item.artist = (
             cover, title, artist)
+        list_item.play = play
 
     def _on_card_bind(self, _factory, list_item):
         album = list_item.get_item().album
         list_item.title.set_label(album.title)
         list_item.title.set_tooltip_text(album.title)
         list_item.artist.set_label(album.artist.name)
+        # Bouton « Lire l'album » seulement quand l'album a des pistes
+        # jouables : sinon un clic ne lancerait rien. has_audio est fourni
+        # par le serveur même en liste (voir Album.has_audio). La cellule
+        # étant recyclée, on repositionne la visibilité à chaque bind.
+        list_item.play.set_visible(album.has_audio)
 
         cover = list_item.cover
         client = self._app.get_client()

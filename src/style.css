@@ -13,6 +13,32 @@
   background-color: alpha(currentColor, 0.1);
 }
 
+/* Bouton « Lire l'album » flottant en surimpression de la pochette : pastille
+   pleine à l'accent (bleu par défaut), icône blanche (parité avec le bouton
+   play flottant des cartes Android). */
+.jewelbox-cover-play {
+  color: #ffffff;
+  background-color: @accent_bg_color;
+  min-width: 36px;
+  min-height: 36px;
+  -gtk-icon-size: 18px;
+  box-shadow: 0 1px 4px alpha(black, 0.4);
+}
+.jewelbox-cover-play:hover {
+  background-color: shade(@accent_bg_color, 1.1);
+}
+.jewelbox-cover-play:active {
+  background-color: shade(@accent_bg_color, 0.9);
+}
+
+/* Variante compacte pour la petite pochette des tuiles « Récemment écouté »
+   (56px) : pastille et icône réduites pour ne pas manger toute la pochette. */
+.jewelbox-cover-play-small {
+  min-width: 26px;
+  min-height: 26px;
+  -gtk-icon-size: 13px;
+}
+
 /* Mini-lecteur : layout et proportions calqués sur le mini-lecteur web
    (player.css) — barre 72px, bouton lecture en pastille pleine, coins de
    pochette arrondis à 4px comme .player-bar-cover. */
