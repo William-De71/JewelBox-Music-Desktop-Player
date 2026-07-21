@@ -4,6 +4,10 @@ data/io.github.william_de71.JewelBox.gschema.xml
 src/jewelbox/main.py
 src/jewelbox/window.py
 src/jewelbox/ui/album_detail.py
+src/jewelbox/ui/full_player.py
+src/jewelbox/ui/home.py
 src/jewelbox/ui/library.py
+src/jewelbox/ui/no_server_page.py
 src/jewelbox/ui/player_bar.py
 src/jewelbox/ui/preferences.py
+src/jewelbox/ui/search.py
