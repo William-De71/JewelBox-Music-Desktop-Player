@@ -57,6 +57,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._status_row.add_suffix(self._test_button)
         group.add(self._status_row)
 
+        # Bouton « Fermer » centré en bas : le × de la barre de titre ferme
+        # déjà le dialogue, celui-ci offre une cible plus évidente au bas de
+        # la page.
+        close_button = Gtk.Button(
+            label=_('Fermer'), halign=Gtk.Align.CENTER,
+            margin_top=12, css_classes=['pill'])
+        close_button.connect('clicked', lambda *_a: self.close())
+        close_group = Adw.PreferencesGroup()
+        close_group.add(close_button)
+        page.add(close_group)
+
     # ── Actions ──────────────────────────────────────────────────────────────
 
     def _on_test(self, _button):

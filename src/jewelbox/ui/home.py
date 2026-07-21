@@ -25,6 +25,9 @@ from jewelbox.api.client import ApiError
 
 _RECENT_COVER_SIZE = 56
 _SUGGESTION_COVER_SIZE = 160
+_LATEST_COVER_SIZE = 120
+# Nombre de derniers albums enregistrés affichés en tête des suggestions.
+_LATEST_COUNT = 5
 
 
 class _AlbumItem(GObject.Object):
@@ -75,8 +78,8 @@ class HomePage(Gtk.Stack):
             selection_mode=Gtk.SelectionMode.NONE,
             min_children_per_line=2,
             max_children_per_line=2,
-            column_spacing=12,
-            row_spacing=8,
+            column_spacing=6,
+            row_spacing=4,
             homogeneous=True)
         self._recent_box.connect('child-activated', self._on_recent_activated)
 
@@ -101,10 +104,26 @@ class HomePage(Gtk.Stack):
         self._suggestions_group = self._build_group(
             _('Suggestions'), self._suggestions_grid)
 
+        # Ligne « Derniers ajouts » : les albums les plus récemment enregistrés
+        # sur le serveur, en rangée horizontale de pochettes carrées. Elle est
+        # placée juste sous le titre Suggestions (parité avec l'idée d'une
+        # étagère de nouveautés en tête de la section suggestions).
+        self._latest_box = Gtk.Box(spacing=12)
+        # Même retrait à gauche que les cellules du GridView Suggestions, pour
+        # que les pochettes des deux sections s'alignent (voir style.css).
+        self._latest_box.add_css_class('jewelbox-latest-row')
+        latest_scroller = Gtk.ScrolledWindow(
+            child=self._latest_box,
+            vscrollbar_policy=Gtk.PolicyType.NEVER,
+            propagate_natural_height=True)
+        self._latest_group = self._build_group(
+            _('Derniers ajouts'), latest_scroller)
+
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                           margin_start=18, margin_end=18,
                           margin_top=18, margin_bottom=18)
         content.append(self._recent_group)
+        content.append(self._latest_group)
         content.append(self._suggestions_group)
 
         self.add_named(
@@ -170,12 +189,25 @@ class HomePage(Gtk.Stack):
         if generation != self._load_generation:
             return
 
+        # Derniers albums enregistrés sur le serveur (best-effort : la ligne
+        # reste masquée si l'appel échoue, sans compromettre le reste de
+        # l'accueil). Tri par date d'ajout décroissante.
+        try:
+            latest_page = await client.albums(
+                page=1, limit=_LATEST_COUNT,
+                sort='created_at', order='desc')
+            latest = latest_page.data
+        except ApiError:
+            latest = ()
+        if generation != self._load_generation:
+            return
+
         # Ne garder que les entrées récentes réellement ouvrables (album ou
         # playlist présent), plafonnées à 8 comme le client Android.
         recent = [item for item in home.recent
                   if item.album is not None or item.playlist is not None][:8]
 
-        if not recent and not home.suggestions:
+        if not recent and not home.suggestions and not latest:
             self._show_status(
                 icon='user-home-symbolic',
                 title=_('Rien à afficher pour l’instant'),
@@ -186,6 +218,7 @@ class HomePage(Gtk.Stack):
             return
 
         self._populate_recent(client, recent)
+        self._populate_latest(client, latest)
         self._populate_suggestions(home.suggestions)
         self.set_visible_child_name('content')
 
@@ -195,6 +228,13 @@ class HomePage(Gtk.Stack):
             self._recent_box.remove(child)
         for item in recent:
             self._recent_box.append(self._build_recent_tile(client, item))
+
+    def _populate_latest(self, client, latest):
+        self._latest_group.set_visible(bool(latest))
+        while (child := self._latest_box.get_first_child()) is not None:
+            self._latest_box.remove(child)
+        for album in latest:
+            self._latest_box.append(self._build_latest_tile(client, album))
 
     def _populate_suggestions(self, suggestions):
         self._suggestions_group.set_visible(bool(suggestions))
@@ -317,7 +357,7 @@ class HomePage(Gtk.Stack):
             content_fit=Gtk.ContentFit.COVER,
             width_request=_SUGGESTION_COVER_SIZE,
             height_request=_SUGGESTION_COVER_SIZE,
-            halign=Gtk.Align.CENTER,
+            halign=Gtk.Align.START,
             overflow=Gtk.Overflow.HIDDEN,
         )
         cover.add_css_class('jewelbox-cover')
@@ -333,7 +373,7 @@ class HomePage(Gtk.Stack):
             css_classes=['circular', 'jewelbox-cover-play'])
         play.connect('clicked', self._on_suggestion_play_clicked, list_item)
 
-        overlay = Gtk.Overlay(child=cover, halign=Gtk.Align.CENTER)
+        overlay = Gtk.Overlay(child=cover, halign=Gtk.Align.START)
         overlay.add_overlay(play)
 
         title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END,
@@ -343,9 +383,13 @@ class HomePage(Gtk.Stack):
                            max_width_chars=18,
                            css_classes=['caption', 'dim-label'])
 
+        # Cartes calées à gauche dans leur cellule : sur grand écran le GridView
+        # étale les colonnes, une carte centrée flotterait loin du bord et ne
+        # s'alignerait plus avec les sections « Récemment écouté » / « Derniers
+        # ajouts » au-dessus.
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
                        width_request=_SUGGESTION_COVER_SIZE,
-                       halign=Gtk.Align.CENTER)
+                       halign=Gtk.Align.START)
         card.append(overlay)
         card.append(title)
         card.append(artist)
@@ -383,6 +427,74 @@ class HomePage(Gtk.Stack):
         item = list_item.get_item()
         if item is not None:
             self._play_album(item.album.id)
+
+    # ── Ligne « Derniers ajouts » ─────────────────────────────────────────────
+
+    def _build_latest_tile(self, client, album):
+        """Carte carrée d'un album récemment enregistré : pochette cliquable
+        (ouvre la fiche) avec bouton « Lire l'album » en surimpression. Même
+        présentation que les suggestions, mais en widget statique posé dans une
+        rangée horizontale plutôt qu'une cellule de GridView recyclée.
+
+        Le bouton-carte et le bouton lecture sont frères dans l'Overlay (jamais
+        imbriqués : GTK interdit un bouton dans un bouton). Le bouton lecture,
+        posé au-dessus, capte son propre clic ; ailleurs sur la pochette, c'est
+        le bouton-carte qui ouvre la fiche."""
+        cover = Gtk.Picture(
+            content_fit=Gtk.ContentFit.COVER,
+            width_request=_LATEST_COVER_SIZE,
+            height_request=_LATEST_COVER_SIZE,
+            overflow=Gtk.Overflow.HIDDEN)
+        cover.add_css_class('jewelbox-cover')
+
+        if album.cover_url:
+            url = client.resolve_cover(album.cover_url)
+            cover._wanted_url = url
+            cover.set_paintable(self._textures.get(url))
+            if url and url not in self._textures:
+                task = self._load_cover(cover, url)
+                asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+        # Bouton-carte : la pochette entière est cliquable et ouvre la fiche.
+        cover_button = Gtk.Button(
+            child=cover, css_classes=['flat', 'jewelbox-cover-button'])
+        cover_button.connect('clicked', self._on_latest_activated, album.id)
+
+        overlay = Gtk.Overlay(child=cover_button, halign=Gtk.Align.START)
+        if album.has_audio:
+            play = Gtk.Button(
+                icon_name='media-playback-start-symbolic',
+                halign=Gtk.Align.END, valign=Gtk.Align.END,
+                margin_end=6, margin_bottom=6,
+                tooltip_text=_('Lire l’album'),
+                css_classes=['circular', 'jewelbox-cover-play'])
+            play.connect('clicked', self._on_latest_play_clicked, album.id)
+            overlay.add_overlay(play)
+
+        title = Gtk.Label(
+            label=album.title, xalign=0,
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=14,
+            tooltip_text=album.title,
+            css_classes=['caption-heading'])
+        artist = Gtk.Label(
+            label=album.artist.name, xalign=0,
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=14,
+            css_classes=['caption', 'dim-label'])
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                       width_request=_LATEST_COVER_SIZE,
+                       halign=Gtk.Align.START)
+        card.append(overlay)
+        card.append(title)
+        card.append(artist)
+        return card
+
+    def _on_latest_activated(self, _button, album_id):
+        if self.on_album_activated is not None:
+            self.on_album_activated(album_id)
+
+    def _on_latest_play_clicked(self, _button, album_id):
+        self._play_album(album_id)
 
     # ── Lecture d'un album depuis une carte ──────────────────────────────────
 
