@@ -31,6 +31,18 @@ class PlayerBar(Gtk.CenterBox):
         self._seeking = False   # vrai pendant un glisser manuel du curseur
         self._cover_url = None
         self._volume = 1.0      # dernier volume non nul, pour le rétablir
+        # Appelé quand l'utilisateur clique la zone info (pochette + titre) :
+        # ouvre le grand lecteur, comme un tap sur le mini-lecteur Android.
+        self.on_open_full_player = None
+        # Dernière valeur de has_item : quand le grand lecteur se ferme, la
+        # fenêtre appelle restore_visibility() qui s'y réfère (le mini-lecteur
+        # ne doit réapparaître que si une piste est effectivement chargée).
+        self._has_item = False
+        # Posé par la fenêtre quand le grand lecteur est ouvert : le mini-
+        # lecteur reste masqué même si _on_state continue d'arriver (la position
+        # avance en continu et rappellerait sinon set_visible(True) à chaque
+        # tick, réaffichant le mini-lecteur par-dessus le grand lecteur).
+        self._suppressed = False
 
         self.set_start_widget(self._build_info())
         self.set_center_widget(self._build_center())
@@ -76,7 +88,20 @@ class PlayerBar(Gtk.CenterBox):
         info = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         info.append(cover_frame)
         info.append(labels)
+
+        # Un clic sur la zone info ouvre le grand lecteur (parité avec le tap
+        # sur le mini-lecteur Android). Les contrôles de transport vivent dans
+        # la zone centrale et gardent donc leurs propres clics. Le curseur main
+        # signale la zone cliquable.
+        info.set_cursor(Gdk.Cursor.new_from_name('pointer', None))
+        click = Gtk.GestureClick()
+        click.connect('released', self._on_info_clicked)
+        info.add_controller(click)
         return info
+
+    def _on_info_clicked(self, *_args):
+        if self.on_open_full_player is not None:
+            self.on_open_full_player()
 
     # ── Zone centrale : contrôles + progression ──────────────────────────────
 
@@ -238,8 +263,25 @@ class PlayerBar(Gtk.CenterBox):
 
     # ── État ─────────────────────────────────────────────────────────────────
 
+    def suppress(self):
+        """Appelée par la fenêtre à l'ouverture du grand lecteur : masque le
+        mini-lecteur et l'y maintient malgré les _on_state qui continuent
+        d'arriver (avance de la position)."""
+        self._suppressed = True
+        self.set_visible(False)
+
+    def restore_visibility(self):
+        """Rappelée par la fenêtre à la fermeture du grand lecteur, qui avait
+        masqué le mini-lecteur : il ne réapparaît que si une piste est chargée."""
+        self._suppressed = False
+        self.set_visible(self._has_item)
+
     def _on_state(self, state):
-        self.set_visible(state.has_item)
+        self._has_item = state.has_item
+        # Tant que le grand lecteur est ouvert, le mini-lecteur reste masqué :
+        # on met quand même à jour le contenu ci-dessous (il sera à jour au
+        # retour), mais jamais la visibilité.
+        self.set_visible(state.has_item and not self._suppressed)
         if not state.has_item:
             return
 

@@ -107,6 +107,9 @@ class AlbumDetailPage(Gtk.Stack):
             selection_mode=Gtk.SelectionMode.NONE,
             css_classes=['boxed-list'],
             margin_start=24, margin_end=24, margin_bottom=24)
+        # « row-activated » est le signal émis par le clic (ou Entrée) sur une
+        # ligne activatable — d'où le comportement « clic n'importe où ».
+        self._tracks_box.connect('row-activated', self._on_row_activated)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.append(header)
@@ -233,21 +236,35 @@ class AlbumDetailPage(Gtk.Stack):
         if not track.has_file:
             row.add_css_class('track-unavailable')
         else:
-            # Simple clic n'importe où sur la ligne : ListBoxRow.activate
-            # se déclenche nativement au clic (pas de double-clic requis).
-            row.connect('activate', lambda *_a: self._play(album, track.id))
+            # L'album et l'id de piste sont portés par la row pour que le
+            # gestionnaire « row-activated » de la ListBox (voir _build_content)
+            # les retrouve au clic. Le signal « activate » d'une ListBoxRow ne
+            # se déclenche PAS au clic souris (seulement au clavier / par
+            # programme) : c'est « row-activated » sur la ListBox parente qui
+            # répond au clic — c'est ce qui empêchait le clic sur la ligne
+            # d'agir alors que le bouton, lui, marchait.
+            row._album = album
+            row._track_id = track.id
 
         self._track_rows[track.id] = (row, play_button, position_label)
         return row
 
-    def _play(self, album, track_id):
-        playback = self._app.playback
-        if playback is not None:
-            playback.play_album(album, track_id)
+    def _on_row_activated(self, _listbox, row):
+        # album/track_id posés sur la row à sa construction (voir
+        # _build_track_row) ; absents sur une piste sans fichier (non
+        # activatable, donc ce signal ne s'y déclenche pas de toute façon).
+        album = getattr(row, '_album', None)
+        if album is not None:
+            self._toggle_or_play(album, row._track_id)
 
     def _on_track_button_clicked(self, _button, album, track_id):
-        # Sur la piste déjà en cours, le bouton pilote pause/reprise ; sur une
-        # autre, il lance cette piste-là.
+        self._toggle_or_play(album, track_id)
+
+    def _toggle_or_play(self, album, track_id):
+        # Sur la piste déjà en cours, pause/reprise ; sur une autre, on la
+        # lance. Partagé par le bouton lecture et le clic sur la ligne, pour
+        # qu'un clic n'importe où sur la piste courante bascule pause/reprise
+        # au lieu de la relancer depuis le début.
         playback = self._app.playback
         if playback is None:
             return

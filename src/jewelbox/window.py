@@ -3,6 +3,7 @@ from gettext import gettext as _
 from gi.repository import Adw, Gtk
 
 from jewelbox.ui.album_detail import AlbumDetailPage
+from jewelbox.ui.full_player import FullPlayerPage
 from jewelbox.ui.library import LibraryPage
 from jewelbox.ui.no_server_page import build_no_server_page
 from jewelbox.ui.player_bar import PlayerBar
@@ -78,6 +79,17 @@ class JewelboxWindow(Adw.ApplicationWindow):
 
         self._switcher_bar = Adw.ViewSwitcherBar(stack=self._stack)
         self._player_bar = PlayerBar(self.get_application())
+        self._player_bar.on_open_full_player = self._open_full_player
+
+        # Grand lecteur : une seule instance (elle s'abonne à la session pour
+        # la vie de la fenêtre), poussée/dépilée à la demande. Le mini-lecteur
+        # et le sélecteur d'onglets sont masqués tant qu'il est ouvert — il
+        # occupe tout l'écran, comme le NowPlayingScreen mobile.
+        self._full_player = FullPlayerPage(self.get_application())
+        self._full_player.on_closed = self._close_full_player
+        self._full_player_page = Adw.NavigationPage(
+            child=self._full_player, title=_('Lecture en cours'),
+            tag='full-player')
 
         toolbar_view = Adw.ToolbarView(content=self._nav)
         toolbar_view.add_top_bar(header_bar)
@@ -143,6 +155,28 @@ class JewelboxWindow(Adw.ApplicationWindow):
         can_go_back = (visible is not None
                        and self._nav.get_previous_page(visible) is not None)
         self._back_button.set_visible(can_go_back)
+
+        # Le grand lecteur occupe tout l'écran : on masque le mini-lecteur et
+        # le sélecteur d'onglets tant qu'il est visible, on les rétablit dès
+        # qu'on en sort (le mini-lecteur gère seul sa visibilité selon l'état
+        # de lecture via son propre _on_state, d'où le rappel manuel ici).
+        on_full_player = visible is self._full_player_page
+        self._switcher_bar.set_visible(not on_full_player)
+        if on_full_player:
+            self._player_bar.suppress()
+        else:
+            self._player_bar.restore_visibility()
+
+    def _open_full_player(self):
+        # No-op si déjà ouvert (un second clic ne l'empile pas deux fois).
+        if self._nav.get_visible_page() is self._full_player_page:
+            return
+        self._nav.push(self._full_player_page)
+
+    def _close_full_player(self):
+        # La file s'est vidée : dépile le grand lecteur s'il est ouvert.
+        if self._nav.get_visible_page() is self._full_player_page:
+            self._nav.pop()
 
     def _open_album(self, album_id: int):
         page = AlbumDetailPage(self.get_application(), album_id)
