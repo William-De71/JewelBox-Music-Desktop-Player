@@ -178,8 +178,11 @@ class FullPlayerPage(Gtk.Box):
         self._shuffle_button = Gtk.ToggleButton(
             icon_name='media-playlist-shuffle-symbolic', css_classes=['flat'],
             valign=Gtk.Align.CENTER, tooltip_text=_('Lecture aléatoire'))
-        self._shuffle_button.connect(
-            'toggled', lambda *_a: self._app.playback.toggle_shuffle())
+        # _updating_shuffle protège le set_active programmatique de _on_state :
+        # sinon resynchroniser le bouton réémettrait « toggled » et rappellerait
+        # toggle_shuffle → _publish → _on_state en boucle (cf. player_bar).
+        self._updating_shuffle = False
+        self._shuffle_button.connect('toggled', self._on_shuffle_toggled)
 
         self._previous_button = Gtk.Button(
             icon_name='media-skip-backward-symbolic', css_classes=['flat'],
@@ -230,6 +233,13 @@ class FullPlayerPage(Gtk.Box):
         self._release_id = None
         return False  # one-shot
 
+    def _on_shuffle_toggled(self, _button):
+        # N'agit qu'au clic utilisateur, jamais au set_active programmatique de
+        # _on_state (protégé par _updating_shuffle) — voir player_bar.
+        if self._updating_shuffle:
+            return
+        self._app.playback.toggle_shuffle()
+
     def _on_favorite_toggled(self, _button):
         # set_active programmatique de _on_state protégé par _updating_favorite.
         if getattr(self, '_updating_favorite', False):
@@ -255,7 +265,9 @@ class FullPlayerPage(Gtk.Box):
         self._previous_button.set_sensitive(state.has_previous)
         self._next_button.set_sensitive(state.has_next)
 
+        self._updating_shuffle = True
         self._shuffle_button.set_active(state.shuffle)
+        self._updating_shuffle = False
         self._shuffle_button.set_css_classes(
             ['flat', 'accent'] if state.shuffle else ['flat'])
         self._repeat_button.set_icon_name({

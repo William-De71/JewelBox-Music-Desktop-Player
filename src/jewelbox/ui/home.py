@@ -7,9 +7,9 @@ compactes (petite pochette, titre, sous-titre). Ensuite « Suggestions » —
 une grille de pochettes carrées d'albums, comme la Bibliothèque.
 
 Un clic sur un album (récent ou suggéré) ouvre sa fiche ; un clic sur une
-playlist récente lance sa lecture (le desktop n'a pas encore de fiche
-playlist). Le flux se recharge à chaque affichage (la fenêtre le déclenche)
-et après le début d'une nouvelle file, pour rester à jour.
+playlist récente ouvre sa fiche (onglet Playlists). Le flux se recharge à
+chaque affichage (la fenêtre le déclenche) et après le début d'une nouvelle
+file, pour rester à jour.
 
 Code frontière (exclu de la couverture) : cette page ne fait qu'afficher un
 Home chargé par api.client et déléguer l'ouverture à la fenêtre / la lecture

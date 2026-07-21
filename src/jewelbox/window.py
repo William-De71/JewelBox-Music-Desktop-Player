@@ -9,9 +9,11 @@ from jewelbox.ui.album_detail import AlbumDetailPage
 from jewelbox.ui.full_player import FullPlayerPage
 from jewelbox.ui.home import HomePage
 from jewelbox.ui.library import LibraryPage
-from jewelbox.ui.no_server_page import build_no_server_page
 from jewelbox.ui.player_bar import PlayerBar
+from jewelbox.ui.playlist_detail import PlaylistDetailPage
+from jewelbox.ui.playlists import PlaylistsPage
 from jewelbox.ui.search import SearchPage
+from jewelbox.ui.smart_playlist_detail import SmartPlaylistDetailPage
 
 
 class JewelboxWindow(Adw.ApplicationWindow):
@@ -26,10 +28,9 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self.set_size_request(360, 294)
 
         self._stack = Adw.ViewStack()
-        self._pages = {}
         self._home = HomePage(self.get_application())
         self._home.on_album_activated = self._open_album
-        self._home.on_playlist_activated = self._play_playlist
+        self._home.on_playlist_activated = self._open_playlist
         self._stack.add_titled_with_icon(
             self._home, 'home', _('Accueil'), 'user-home-symbolic')
         self._library = LibraryPage(self.get_application())
@@ -41,9 +42,15 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self._search.on_album_activated = self._open_album
         self._stack.add_titled_with_icon(
             self._search, 'search', _('Recherche'), 'system-search-symbolic')
-        self._add_placeholder_page(
-            'playlists', _('Playlists'), 'view-list-symbolic',
-            _('Listes intelligentes et playlists arriveront ici.'))
+        self._playlists = PlaylistsPage(self.get_application())
+        self._playlists.on_playlist_activated = self._open_playlist
+        self._playlists.on_smart_activated = self._open_smart_playlist
+        # Groupe d'actions du menu contextuel (renommer / supprimer) : monté
+        # sur la page sous le préfixe « playlists » que citent ses items.
+        self._playlists.insert_action_group(
+            'playlists', self._playlists.install_actions())
+        self._stack.add_titled_with_icon(
+            self._playlists, 'playlists', _('Playlists'), 'view-list-symbolic')
 
         switcher = Adw.ViewSwitcher(
             stack=self._stack,
@@ -118,40 +125,17 @@ class JewelboxWindow(Adw.ApplicationWindow):
 
         self._refresh_server_hint()
 
-    def _add_placeholder_page(self, name, title, icon_name, description):
-        """Onglet pas encore développé : bascule entre son propre
-        Adw.StatusPage et la page « aucun serveur configuré » commune, pour
-        un rendu identique à celui de la Bibliothèque sur tous les onglets."""
-        content_page = Adw.StatusPage(
-            title=title,
-            icon_name=icon_name,
-            description=description,
-        )
-        no_server_page = build_no_server_page()
-
-        tab_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
-        tab_stack.add_named(content_page, 'content')
-        tab_stack.add_named(no_server_page, 'no-server')
-
-        stack_page = self._stack.add_titled_with_icon(
-            tab_stack, name, title, icon_name)
-        self._pages[name] = tab_stack
-        return stack_page
-
     def _refresh_server_hint(self):
-        """Sans serveur configuré, chaque onglet non développé bascule vers
-        la même page « Aucun serveur configuré » que la Bibliothèque, qui
-        gère ses propres états et se recharge au même moment.
-        Appelé à la construction et à la fermeture des Préférences."""
+        """Chaque onglet gère seul son état « Aucun serveur configuré » via son
+        reload() : on les recharge tous ici (construction, fermeture des
+        Préférences), ils basculent d'eux-mêmes selon la présence d'un client."""
         app = self.get_application()
         if app is None:
             return
-        connected = app.get_client() is not None
-        for tab_stack in self._pages.values():
-            tab_stack.set_visible_child_name('content' if connected else 'no-server')
         self._home.reload()
         self._library.reload()
         self._search.reload()
+        self._playlists.reload()
 
     def _on_tab_changed(self, *_args):
         # pop_to_page(racine) est un no-op si on y est déjà : sûr à appeler à
@@ -163,6 +147,10 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # serveur configuré, reload() bascule seul vers son état « message ».
         if self._stack.get_visible_child() is self._home:
             self._home.reload()
+        # De même pour les Playlists : une playlist créée/renommée/supprimée
+        # depuis une fiche empilée doit se refléter au retour sur l'onglet.
+        elif self._stack.get_visible_child() is self._playlists:
+            self._playlists.reload()
 
     def _on_nav_page_changed(self, *_args):
         # get_previous_page renvoie None quand la page visible est la racine :
@@ -200,30 +188,34 @@ class JewelboxWindow(Adw.ApplicationWindow):
         page.on_title_known = nav_page.set_title
         self._nav.push(nav_page)
 
-    def _play_playlist(self, playlist_id: int):
-        # Le desktop n'a pas encore de fiche playlist : depuis l'accueil, un
-        # clic sur une playlist récente en lance directement la lecture. On
-        # signale la lecture au serveur pour qu'elle remonte dans les récents.
-        app = self.get_application()
-        client = app.get_client()
-        if client is None or app.playback is None:
-            return
-        loop = asyncio.get_event_loop_policy().get_event_loop()
-        loop.create_task(self._load_and_play_playlist(client, playlist_id))
+    def _open_playlist(self, playlist_id: int):
+        """Empile la fiche d'une playlist utilisateur (depuis l'onglet
+        Playlists ou une tuile récente de l'accueil)."""
+        page = PlaylistDetailPage(self.get_application(), playlist_id)
+        nav_page = Adw.NavigationPage(child=page, title=_('Playlist'))
+        page.on_title_known = nav_page.set_title
+        page.on_renamed = nav_page.set_title
+        # Une suppression depuis la fiche dépile aussitôt vers l'onglet, qui se
+        # rafraîchira via _on_tab_changed en révélant la liste à jour.
+        page.on_deleted = lambda: self._pop_if_current(nav_page)
+        # Menu par entrée (monter / descendre / retirer) : groupe local à la
+        # page, sous le préfixe « playlist-entry » que citent ses items.
+        page.insert_action_group('playlist-entry', page.install_actions())
+        self._nav.push(nav_page)
 
-    async def _load_and_play_playlist(self, client, playlist_id):
-        try:
-            playlist = await client.playlist(playlist_id)
-        except ApiError:
-            return
-        app = self.get_application()
-        if app.playback is None:
-            return
-        app.playback.play_queue_tracks(playlist.tracks)
-        try:
-            await client.report_play('playlist', playlist_id)
-        except ApiError:
-            pass  # best-effort, comme le reste de l'app
+    def _open_smart_playlist(self, key: str):
+        """Empile la fiche d'une liste intelligente (lecture seule ; le mix
+        dynamique y ajoute relancer / retirer)."""
+        page = SmartPlaylistDetailPage(self.get_application(), key)
+        nav_page = Adw.NavigationPage(child=page, title=page.title())
+        page.on_title_known = nav_page.set_title
+        self._nav.push(nav_page)
+
+    def _pop_if_current(self, nav_page):
+        # Ne dépile que si la fiche est bien en tête (l'utilisateur a pu
+        # naviguer ailleurs entre-temps) ; pop() serait sinon un mauvais retour.
+        if self._nav.get_visible_page() is nav_page:
+            self._nav.pop()
 
     def _build_main_menu(self):
         from gi.repository import Gio
