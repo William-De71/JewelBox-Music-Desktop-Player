@@ -132,6 +132,26 @@ class Queue:
             self._position = len(self._order) - 1
         return self.state()
 
+    def peek_next(self) -> QueueItem | None:
+        """La piste qui suivrait sur une fin naturelle, SANS avancer la file.
+
+        Sert à l'enchaînement sans coupure : le moteur doit précharger l'URI
+        exacte que track_ended() rendra ensuite courante. On raisonne donc
+        dans l'ordre de LECTURE (_order) — pas l'ordre d'affichage — sinon,
+        en mode aléatoire, l'audio préchargé et la piste affichée divergent.
+
+        En mode ONE, la fin naturelle rejoue la même piste (comme
+        track_ended()), donc on renvoie la piste courante."""
+        if not self._items or not (0 <= self._position < len(self._order)):
+            return None
+        if self._repeat == RepeatMode.ONE:
+            return self._items[self._order[self._position]]
+        if self._position < len(self._order) - 1:
+            return self._items[self._order[self._position + 1]]
+        if self._repeat == RepeatMode.ALL:
+            return self._items[self._order[0]]
+        return None
+
     def track_ended(self) -> QueueState:
         """La piste courante est arrivée à sa fin naturelle (à distinguer
         d'un next() manuel : en mode ONE elle rejoue, en fin de file sans

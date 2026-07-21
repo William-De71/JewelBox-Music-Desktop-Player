@@ -175,6 +175,57 @@ def test_track_ended_on_empty_queue_is_a_no_op():
     assert state.current is None
 
 
+# ── peek_next : l'URI préchargée doit égaler la future piste courante ─────────
+
+def test_peek_next_returns_following_track_without_advancing():
+    queue = Queue()
+    queue.load(make_items(3), start_index=0)
+    assert queue.peek_next().track_id == 2
+    # aucun effet de bord : la piste courante n'a pas bougé
+    assert queue.state().current.track_id == 1
+
+
+def test_peek_next_at_last_item_no_repeat_is_none():
+    queue = Queue()
+    queue.load(make_items(2), start_index=1)
+    assert queue.peek_next() is None
+
+
+def test_peek_next_at_last_item_with_repeat_all_wraps():
+    queue = Queue()
+    queue.load(make_items(2), start_index=1)
+    queue.cycle_repeat()  # ALL
+    assert queue.peek_next().track_id == 1
+
+
+def test_peek_next_in_repeat_one_returns_current():
+    queue = Queue()
+    queue.load(make_items(3), start_index=1)
+    queue.cycle_repeat()  # ALL
+    queue.cycle_repeat()  # ONE
+    assert queue.peek_next().track_id == 2
+
+
+def test_peek_next_on_empty_queue_is_none():
+    assert Queue().peek_next() is None
+
+
+def test_peek_next_matches_track_ended_when_shuffled():
+    """Non-régression : en lecture aléatoire, l'URI préchargée par
+    peek_next() (audio) doit être exactement la piste que track_ended()
+    rend ensuite courante (affichage). Sinon le mini-lecteur affiche une
+    autre piste que celle qui joue au passage automatique au suivant."""
+    queue = Queue()
+    queue.load(make_items(6), start_index=0)
+    queue.cycle_repeat()  # ALL, pour boucler et couvrir le retour au début
+    queue.set_shuffle(True)
+    for _ in range(len(make_items(6)) + 1):
+        prepared = queue.peek_next()
+        displayed = queue.track_ended().current
+        assert prepared is not None and displayed is not None
+        assert prepared.track_id == displayed.track_id
+
+
 # ── repeat cycle ──────────────────────────────────────────────────────────────
 
 def test_repeat_cycles_off_all_one_off():
