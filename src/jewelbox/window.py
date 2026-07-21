@@ -11,6 +11,7 @@ from jewelbox.ui.home import HomePage
 from jewelbox.ui.library import LibraryPage
 from jewelbox.ui.no_server_page import build_no_server_page
 from jewelbox.ui.player_bar import PlayerBar
+from jewelbox.ui.search import SearchPage
 
 
 class JewelboxWindow(Adw.ApplicationWindow):
@@ -36,9 +37,10 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self._stack.add_titled_with_icon(
             self._library, 'library', _('Bibliothèque'),
             'media-optical-symbolic')
-        self._add_placeholder_page(
-            'search', _('Recherche'), 'system-search-symbolic',
-            _('La recherche dans la bibliothèque arrivera ici.'))
+        self._search = SearchPage(self.get_application())
+        self._search.on_album_activated = self._open_album
+        self._stack.add_titled_with_icon(
+            self._search, 'search', _('Recherche'), 'system-search-symbolic')
         self._add_placeholder_page(
             'playlists', _('Playlists'), 'view-list-symbolic',
             _('Listes intelligentes et playlists arriveront ici.'))
@@ -149,6 +151,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
             tab_stack.set_visible_child_name('content' if connected else 'no-server')
         self._home.reload()
         self._library.reload()
+        self._search.reload()
 
     def _on_tab_changed(self, *_args):
         # pop_to_page(racine) est un no-op si on y est déjà : sûr à appeler à
