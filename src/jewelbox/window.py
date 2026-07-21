@@ -2,8 +2,12 @@ from gettext import gettext as _
 
 from gi.repository import Adw, Gtk
 
+import asyncio
+
+from jewelbox.api.client import ApiError
 from jewelbox.ui.album_detail import AlbumDetailPage
 from jewelbox.ui.full_player import FullPlayerPage
+from jewelbox.ui.home import HomePage
 from jewelbox.ui.library import LibraryPage
 from jewelbox.ui.no_server_page import build_no_server_page
 from jewelbox.ui.player_bar import PlayerBar
@@ -22,9 +26,11 @@ class JewelboxWindow(Adw.ApplicationWindow):
 
         self._stack = Adw.ViewStack()
         self._pages = {}
-        self._add_placeholder_page(
-            'home', _('Accueil'), 'user-home-symbolic',
-            _('Reprendre l’écoute et suggestions arriveront ici.'))
+        self._home = HomePage(self.get_application())
+        self._home.on_album_activated = self._open_album
+        self._home.on_playlist_activated = self._play_playlist
+        self._stack.add_titled_with_icon(
+            self._home, 'home', _('Accueil'), 'user-home-symbolic')
         self._library = LibraryPage(self.get_application())
         self._library.on_album_activated = self._open_album
         self._stack.add_titled_with_icon(
@@ -141,12 +147,19 @@ class JewelboxWindow(Adw.ApplicationWindow):
         connected = app.get_client() is not None
         for tab_stack in self._pages.values():
             tab_stack.set_visible_child_name('content' if connected else 'no-server')
+        self._home.reload()
         self._library.reload()
 
     def _on_tab_changed(self, *_args):
         # pop_to_page(racine) est un no-op si on y est déjà : sûr à appeler à
         # chaque changement d'onglet.
         self._nav.pop_to_page(self._root_page)
+        # En revenant sur l'Accueil, on recharge le flux : une écoute lancée
+        # depuis un autre onglet a pu enrichir les récents entre-temps (parité
+        # avec le refresh du HomeViewModel Android sur nouvelle file). Sans
+        # serveur configuré, reload() bascule seul vers son état « message ».
+        if self._stack.get_visible_child() is self._home:
+            self._home.reload()
 
     def _on_nav_page_changed(self, *_args):
         # get_previous_page renvoie None quand la page visible est la racine :
@@ -183,6 +196,31 @@ class JewelboxWindow(Adw.ApplicationWindow):
         nav_page = Adw.NavigationPage(child=page, title=_('Album'))
         page.on_title_known = nav_page.set_title
         self._nav.push(nav_page)
+
+    def _play_playlist(self, playlist_id: int):
+        # Le desktop n'a pas encore de fiche playlist : depuis l'accueil, un
+        # clic sur une playlist récente en lance directement la lecture. On
+        # signale la lecture au serveur pour qu'elle remonte dans les récents.
+        app = self.get_application()
+        client = app.get_client()
+        if client is None or app.playback is None:
+            return
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+        loop.create_task(self._load_and_play_playlist(client, playlist_id))
+
+    async def _load_and_play_playlist(self, client, playlist_id):
+        try:
+            playlist = await client.playlist(playlist_id)
+        except ApiError:
+            return
+        app = self.get_application()
+        if app.playback is None:
+            return
+        app.playback.play_queue_tracks(playlist.tracks)
+        try:
+            await client.report_play('playlist', playlist_id)
+        except ApiError:
+            pass  # best-effort, comme le reste de l'app
 
     def _build_main_menu(self):
         from gi.repository import Gio
