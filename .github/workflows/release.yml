@@ -7,11 +7,18 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write
+  contents: write   # créer la GitHub Release
+  pages: write      # déployer le dépôt Flatpak sur GitHub Pages
+  id-token: write   # requis par actions/deploy-pages
+
+# Une seule release/déploiement Pages à la fois.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build Flatpak bundle and create release
+  build:
+    name: Build Flatpak bundle + dépôt ostree
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
@@ -21,15 +28,43 @@ jobs:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
-      - name: 📦 Build Flatpak bundle
-        uses: flathub-infra/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: JewelBox-Music-Desktop-Player-${{ github.ref_name }}.flatpak
-          manifest-path: io.github.william_de71.JewelBox.json
-          cache-key: flatpak-builder-${{ github.sha }}
-          upload-artifact: false
+      # Construit l'app une fois, puis en tire à la fois un bundle .flatpak
+      # (fichier autonome joint à la Release) et un dépôt ostree (servi par
+      # Pages pour les mises à jour via `flatpak update`).
+      - name: 🔨 flatpak-builder → dépôt ostree local
+        run: |
+          flatpak-builder --user --disable-rofiles-fuse --force-clean \
+            --repo=repo --state-dir=.flatpak-builder \
+            builddir io.github.william_de71.JewelBox.json
 
-      - name: 🚀 Create GitHub Release with Flatpak bundle
+      - name: 📦 Exporter le bundle .flatpak autonome
+        run: |
+          flatpak build-bundle repo \
+            "JewelBox-Music-Desktop-Player-${{ github.ref_name }}.flatpak" \
+            io.github.william_de71.JewelBox
+
+      # Métadonnées + résumé du dépôt (index des refs, deltas statiques) que
+      # `flatpak update`/`install` consomment côté client.
+      - name: 🗂️ Finaliser le dépôt ostree
+        run: |
+          flatpak build-update-repo --generate-static-deltas --prune repo
+
+      # Assemble le contenu Pages : le dépôt ostree + la page d'accueil et le
+      # .flatpakrepo versionnés sous .github/pages/ (édités à la main, pas
+      # générés inline → pas de piège d'indentation dans le YAML).
+      - name: 🧩 Assembler le site Pages
+        run: |
+          mkdir -p site/repo
+          cp -r repo/. site/repo/
+          cp .github/pages/index.html site/index.html
+          cp .github/pages/jewelbox.flatpakrepo site/jewelbox.flatpakrepo
+
+      - name: ⬆️ Uploader l'artefact Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: 🚀 Créer la GitHub Release avec le bundle
         uses: softprops/action-gh-release@v2
         with:
           files: JewelBox-Music-Desktop-Player-*.flatpak
@@ -37,11 +72,31 @@ jobs:
           body: |
             ## 🖥️ JewelBox Music Desktop Player ${{ github.ref_name }}
 
-            Bundle Flatpak prêt à installer (Linux x86_64, runtime GNOME 50).
+            Deux façons d'installer (Linux x86_64, runtime GNOME 50) :
 
-            ### Installation
+            ### Dépôt Flatpak — recommandé (mises à jour via `flatpak update`)
+            ```bash
+            flatpak remote-add --user --no-gpg-verify jewelbox \
+              https://william-de71.github.io/JewelBox-Music-Desktop-Player/jewelbox.flatpakrepo
+            flatpak install --user jewelbox io.github.william_de71.JewelBox
+            flatpak run io.github.william_de71.JewelBox
+            ```
+
+            ### Bundle autonome (pas de mise à jour auto)
             ```bash
             flatpak install flathub org.gnome.Platform//50   # si absent
             flatpak install --user JewelBox-Music-Desktop-Player-${{ github.ref_name }}.flatpak
             flatpak run io.github.william_de71.JewelBox
             ```
+
+  deploy-pages:
+    name: Déployer le dépôt Flatpak sur GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 🌐 Déployer sur Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
