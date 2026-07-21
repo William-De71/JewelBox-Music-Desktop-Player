@@ -109,8 +109,12 @@ class PlayerBar(Gtk.CenterBox):
         self._shuffle_button = Gtk.ToggleButton(
             icon_name='media-playlist-shuffle-symbolic', css_classes=['flat'],
             valign=Gtk.Align.CENTER, tooltip_text=_('Lecture aléatoire'))
-        self._shuffle_button.connect(
-            'toggled', lambda *_a: self._app.playback.toggle_shuffle())
+        # _updating_shuffle protège le set_active programmatique de _on_state :
+        # sans lui, resynchroniser le bouton réémettrait « toggled », donc
+        # rappellerait toggle_shuffle → _publish → _on_state… en boucle (même
+        # précaution que le favori et le volume plus bas).
+        self._updating_shuffle = False
+        self._shuffle_button.connect('toggled', self._on_shuffle_toggled)
 
         self._previous_button = Gtk.Button(
             icon_name='media-skip-backward-symbolic',
@@ -240,6 +244,14 @@ class PlayerBar(Gtk.CenterBox):
         self._release_id = None
         return False  # one-shot
 
+    def _on_shuffle_toggled(self, _button):
+        # Comme le favori : n'agit qu'au clic utilisateur, jamais au set_active
+        # programmatique de _on_state (protégé par _updating_shuffle), sinon la
+        # resynchro du bouton relancerait toggle_shuffle en boucle.
+        if self._updating_shuffle:
+            return
+        self._app.playback.toggle_shuffle()
+
     def _on_favorite_toggled(self, button):
         # Le bascule vient de PlaybackSession (source de vérité) ; ce
         # gestionnaire ne réagit qu'à un clic utilisateur, pas au set_active
@@ -293,7 +305,9 @@ class PlayerBar(Gtk.CenterBox):
         self._previous_button.set_sensitive(state.has_previous)
         self._next_button.set_sensitive(state.has_next)
 
+        self._updating_shuffle = True
         self._shuffle_button.set_active(state.shuffle)
+        self._updating_shuffle = False
         self._shuffle_button.set_css_classes(
             ['flat', 'accent'] if state.shuffle else ['flat'])
         self._repeat_button.set_icon_name({

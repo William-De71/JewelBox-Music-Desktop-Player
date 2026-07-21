@@ -113,9 +113,15 @@ class PlaybackSession:
         self._start_current(client)
         self._report_play_started('album', album.id)
 
-    def play_queue_tracks(self, tracks, start_index: int = 0):
+    def play_queue_tracks(self, tracks, start_index: int = 0,
+                          report_playlist_id: int | None = None):
         """Pour playlists / smart playlists : tracks au format QueueTrack
-        (déjà porteurs d'album/artiste), seules les pistes jouables gardées."""
+        (déjà porteurs d'album/artiste), seules les pistes jouables gardées.
+
+        report_playlist_id, s'il est fourni, signale au serveur le début de
+        lecture d'une playlist utilisateur (alimente les récents de l'accueil).
+        On ne le passe PAS pour les smart playlists : côté Android, les files
+        intelligentes ne sont délibérément pas des entrées d'historique."""
         client = self._get_client()
         if client is None:
             return
@@ -129,6 +135,8 @@ class PlaybackSession:
                 for track in playable]
         self._queue.load(items, start_index=start_index)
         self._start_current(client)
+        if report_playlist_id is not None:
+            self._report_play_started('playlist', report_playlist_id)
 
     def _start_current(self, client):
         current = self._queue.state().current

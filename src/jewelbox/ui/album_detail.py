@@ -54,16 +54,27 @@ class AlbumDetailPage(Gtk.Stack):
         self._content = self._build_content()
         self.add_named(self._content, 'content')
 
+        # Abonnement lié à l'affichage (map/unmap), pas à destroy : dépiler
+        # cette fiche d'un Adw.NavigationView ne la détruit pas, donc destroy
+        # ne se déclenche pas au retour — un abonnement pris ici et rendu à
+        # destroy fuirait, s'accumulant à chaque album ouvert. map/unmap
+        # suivent, eux, l'entrée et la sortie d'écran.
         self._playback = application.playback
-        if self._playback is not None:
-            self._playback.add_listener(self._on_playback_state)
-        self.connect('destroy', self._on_destroy)
+        self._subscribed = False
+        self.connect('map', self._on_map)
+        self.connect('unmap', self._on_unmap)
 
         self.reload()
 
-    def _on_destroy(self, *_args):
-        if self._playback is not None:
+    def _on_map(self, *_args):
+        if self._playback is not None and not self._subscribed:
+            self._playback.add_listener(self._on_playback_state)
+            self._subscribed = True
+
+    def _on_unmap(self, *_args):
+        if self._playback is not None and self._subscribed:
             self._playback.remove_listener(self._on_playback_state)
+            self._subscribed = False
 
     def _build_content(self):
         # Pochette carrée stricte : une Gtk.Picture avec COVER demande une
