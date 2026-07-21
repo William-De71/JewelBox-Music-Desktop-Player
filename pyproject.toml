@@ -14,6 +14,7 @@ omit = [
     "src/jewelbox/ui/*",
     "src/jewelbox/api/client.py",
     "src/jewelbox/playback/player.py",
+    "src/jewelbox/playback/session.py",
     "src/jewelbox/playback/mpris.py",
     "src/jewelbox/discovery/*",
 ]

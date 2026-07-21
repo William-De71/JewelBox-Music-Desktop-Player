@@ -2,8 +2,10 @@ from gettext import gettext as _
 
 from gi.repository import Adw, Gtk
 
+from jewelbox.ui.album_detail import AlbumDetailPage
 from jewelbox.ui.library import LibraryPage
 from jewelbox.ui.no_server_page import build_no_server_page
+from jewelbox.ui.player_bar import PlayerBar
 
 
 class JewelboxWindow(Adw.ApplicationWindow):
@@ -23,6 +25,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
             'home', _('Accueil'), 'user-home-symbolic',
             _('Reprendre l’écoute et suggestions arriveront ici.'))
         self._library = LibraryPage(self.get_application())
+        self._library.on_album_activated = self._open_album
         self._stack.add_titled_with_icon(
             self._library, 'library', _('Bibliothèque'),
             'media-optical-symbolic')
@@ -46,10 +49,19 @@ class JewelboxWindow(Adw.ApplicationWindow):
         menu_button.set_menu_model(self._build_main_menu())
         header_bar.pack_end(menu_button)
 
-        self._switcher_bar = Adw.ViewSwitcherBar(stack=self._stack)
+        # NavigationView pour empiler la fiche album par-dessus les onglets
+        # UNIQUEMENT — le menu (en-tête + ViewSwitcherBar) et le mini-lecteur
+        # doivent rester visibles sur toutes les pages, donc ils vivent dans
+        # le ToolbarView externe, pas dans la page racine du NavigationView.
+        self._nav = Adw.NavigationView()
+        self._nav.add(Adw.NavigationPage(child=self._stack, title='JewelBox'))
 
-        toolbar_view = Adw.ToolbarView(content=self._stack)
+        self._switcher_bar = Adw.ViewSwitcherBar(stack=self._stack)
+        self._player_bar = PlayerBar(self.get_application())
+
+        toolbar_view = Adw.ToolbarView(content=self._nav)
         toolbar_view.add_top_bar(header_bar)
+        toolbar_view.add_bottom_bar(self._player_bar)
         toolbar_view.add_bottom_bar(self._switcher_bar)
         self.set_content(toolbar_view)
 
@@ -98,6 +110,12 @@ class JewelboxWindow(Adw.ApplicationWindow):
         for tab_stack in self._pages.values():
             tab_stack.set_visible_child_name('content' if connected else 'no-server')
         self._library.reload()
+
+    def _open_album(self, album_id: int):
+        page = AlbumDetailPage(self.get_application(), album_id)
+        nav_page = Adw.NavigationPage(child=page, title=_('Album'))
+        page.on_title_known = nav_page.set_title
+        self._nav.push(nav_page)
 
     def _build_main_menu(self):
         from gi.repository import Gio

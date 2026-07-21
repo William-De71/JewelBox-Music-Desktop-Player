@@ -59,6 +59,7 @@ class JewelboxApplication(Adw.Application):
         self.settings = None
         self.device_id = ''
         self._client = None
+        self.playback = None
         GLib.set_application_name('JewelBox Music Player')
 
         self._add_action('quit', lambda *_a: self.quit(), ['<primary>q'])
@@ -69,6 +70,10 @@ class JewelboxApplication(Adw.Application):
     def do_startup(self):
         Adw.Application.do_startup(self)
         self._load_css()
+        # GStreamer/playbin3 : construit une seule fois, indépendant de la
+        # fenêtre (la lecture pourrait un jour continuer fenêtre fermée).
+        from jewelbox.playback.session import PlaybackSession
+        self.playback = PlaybackSession(self.get_client)
         self.settings = _load_settings()
         # Identité de cet appareil (en-tête X-Device-Id) : générée une seule
         # fois, jamais régénérée — le serveur y attache la file de lecture.
