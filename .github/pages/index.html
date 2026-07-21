@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JewelBox Music Desktop Player — dépôt Flatpak</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem;
+           margin: 3rem auto; padding: 0 1rem; line-height: 1.6; }
+    code, pre { background: #f4f4f4; border-radius: 6px; }
+    pre { padding: 1rem; overflow-x: auto; }
+    code { padding: .1rem .3rem; }
+    h1 { font-size: 1.6rem; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1a1a1a; color: #eee; }
+      code, pre { background: #2a2a2a; }
+      a { color: #6cb6ff; }
+    }
+  </style>
+</head>
+<body>
+  <h1>🖥️ JewelBox Music Desktop Player</h1>
+  <p>Dépôt Flatpak auto-hébergé. Installez l'app une fois, puis les versions
+     suivantes arrivent via <code>flatpak update</code>.</p>
+
+  <h2>Installation</h2>
+  <pre><code>flatpak remote-add --user --no-gpg-verify jewelbox \
+  https://william-de71.github.io/JewelBox-Music-Desktop-Player/jewelbox.flatpakrepo
+flatpak install --user jewelbox io.github.william_de71.JewelBox
+flatpak run io.github.william_de71.JewelBox</code></pre>
+
+  <h2>Mise à jour</h2>
+  <pre><code>flatpak update</code></pre>
+
+  <p>Un bundle autonome (sans mise à jour automatique) est aussi disponible
+     dans les
+     <a href="https://github.com/William-De71/JewelBox-Music-Desktop-Player/releases">Releases GitHub</a>.</p>
+</body>
+</html>

@@ -1,0 +1,7 @@
+[Flatpak Repo]
+Title=JewelBox Music Desktop Player
+Url=https://william-de71.github.io/JewelBox-Music-Desktop-Player/repo
+Homepage=https://github.com/William-De71/JewelBox-Music-Desktop-Player
+Comment=Dépôt Flatpak auto-hébergé de JewelBox (mises à jour via flatpak update)
+Description=Client desktop JewelBox — builds publiés par tag vX.Y.Z
+GPGKey=
