@@ -96,14 +96,14 @@ class FullPlayerPage(Gtk.Box):
         aspect = Gtk.AspectFrame(
             ratio=1.0, obey_child=False, hexpand=True, vexpand=False,
             overflow=Gtk.Overflow.HIDDEN, child=self._cover)
-        placeholder = Gtk.Image(
+        self._cover_placeholder = Gtk.Image(
             icon_name='media-optical-symbolic', pixel_size=128,
             css_classes=['dim-label'],
             halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
 
         overlay = Gtk.Overlay(css_classes=['jewelbox-cover'], hexpand=True)
         overlay.set_child(aspect)
-        overlay.add_overlay(placeholder)
+        overlay.add_overlay(self._cover_placeholder)
 
         return Adw.Clamp(
             child=overlay, maximum_size=440, tightening_threshold=440,
@@ -296,6 +296,7 @@ class FullPlayerPage(Gtk.Box):
         if state.cover_url != self._cover_url:
             self._cover_url = state.cover_url
             self._cover.set_paintable(None)
+            self._cover_placeholder.set_visible(True)
             if state.cover_url:
                 task = self._load_cover(state.cover_url)
                 asyncio.get_event_loop_policy().get_event_loop().create_task(task)
@@ -314,3 +315,4 @@ class FullPlayerPage(Gtk.Box):
             return
         if self._cover_url == url:
             self._cover.set_paintable(texture)
+            self._cover_placeholder.set_visible(False)
