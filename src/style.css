@@ -27,3 +27,15 @@
   min-width: 40px;
   min-height: 40px;
 }
+
+/* Grand lecteur : grande pochette à coins arrondis (16px, parité avec le
+   RoundedCornerShape(16.dp) du NowPlayingScreen mobile) et bouton lecture
+   central plus imposant que celui du mini-lecteur. */
+.jewelbox-full-player .jewelbox-cover {
+  border-radius: 16px;
+}
+.jewelbox-full-play {
+  -gtk-icon-size: 28px;
+  min-width: 64px;
+  min-height: 64px;
+}
