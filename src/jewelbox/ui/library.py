@@ -39,6 +39,8 @@ class LibraryPage(Gtk.Stack):
         self._textures = {}          # url → Gdk.Texture (cache session)
         self._store = Gio.ListStore(item_type=_AlbumItem)
         self._load_generation = 0
+        # Appelé avec l'id de l'album activé (double-clic / Entrée).
+        self.on_album_activated = None
 
         # ── État « message » (sans serveur, erreur, bibliothèque vide) ──────
         self._status = Adw.StatusPage()
@@ -65,8 +67,12 @@ class LibraryPage(Gtk.Stack):
             factory=factory,
             min_columns=2,
             max_columns=8,
+            # Simple clic pour ouvrir un album : le double-clic par défaut
+            # de GridView ne correspond pas à une grille d'albums cliquables.
+            single_click_activate=True,
         )
         grid.add_css_class('navigation-sidebar')
+        grid.connect('activate', self._on_activate)
 
         scrolled = Gtk.ScrolledWindow(
             child=grid,
@@ -158,10 +164,18 @@ class LibraryPage(Gtk.Stack):
                      button_action):
         self._status.set_icon_name(icon)
         self._status.set_title(title)
-        self._status.set_description(description)
+        # description est interprétée comme du markup Pango : un message
+        # d'erreur serveur (URL avec « & », etc.) doit être échappé, sinon
+        # Gtk plante l'affichage au lieu de juste montrer du texte brut.
+        self._status.set_description(GLib.markup_escape_text(description))
         self._status_button.set_label(button_label)
         self._status_action = button_action
         self.set_visible_child_name('status')
+
+    def _on_activate(self, _grid, position):
+        item = self._store.get_item(position)
+        if item is not None and self.on_album_activated is not None:
+            self.on_album_activated(item.album.id)
 
     def _on_status_clicked(self, _button):
         if self._status_action:
