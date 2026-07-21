@@ -131,10 +131,16 @@ class PlayerBar(Gtk.CenterBox):
             orientation=Gtk.Orientation.HORIZONTAL,
             draw_value=False, hexpand=True)
         self._seek_scale.set_range(0, 1)
-        seek_pressed = Gtk.GestureClick()
-        seek_pressed.connect('pressed', lambda *_a: setattr(self, '_seeking', True))
-        seek_pressed.connect('released', self._on_seek_released)
-        self._seek_scale.add_controller(seek_pressed)
+        # « change-value » couvre TOUTE interaction utilisateur (clic, glisser,
+        # clavier, molette) et fournit la valeur cible en direct. On seek
+        # directement ici : le GestureClick released n'est PAS fiable sur un
+        # Gtk.Scale (son gestionnaire interne capture le glisser, notre
+        # released n'arrive jamais), c'est ce qui laissait le seek sans effet.
+        # GStreamer avale sans peine les seeks rapprochés (FLUSH). _release_id
+        # lève _seeking un court instant après le dernier mouvement, pour que
+        # _on_state reprenne la main sans « sauter » en cours de glisser.
+        self._release_id = None
+        self._seek_scale.connect('change-value', self._on_seek_change_value)
 
         progress = Gtk.Box(spacing=8, hexpand=True)
         progress.append(self._position_label)
@@ -189,9 +195,25 @@ class PlayerBar(Gtk.CenterBox):
 
     # ── Interactions ─────────────────────────────────────────────────────────
 
-    def _on_seek_released(self, _gesture, _n_press, _x, _y):
+    def _on_seek_change_value(self, _scale, _scroll_type, value):
+        # Toute interaction (clic, glisser, clavier, molette). On seek tout de
+        # suite à la valeur visée et on met à jour le libellé de position ;
+        # _seeking gèle _on_state le temps du geste pour éviter que la synchro
+        # auto ne rebatte le curseur pendant qu'on le déplace.
+        self._seeking = True
+        self._app.playback.seek(value)
+        self._position_label.set_label(format_duration(value))
+        # Rearme un dégel différé : quand les change-value cessent (fin du
+        # glisser), _seeking retombe et _on_state reprend la synchro.
+        if self._release_id is not None:
+            GLib.source_remove(self._release_id)
+        self._release_id = GLib.timeout_add(250, self._end_seek)
+        return False  # laisse GTK bouger le curseur à `value`
+
+    def _end_seek(self):
         self._seeking = False
-        self._app.playback.seek(self._seek_scale.get_value())
+        self._release_id = None
+        return False  # one-shot
 
     def _on_favorite_toggled(self, button):
         # Le bascule vient de PlaybackSession (source de vérité) ; ce

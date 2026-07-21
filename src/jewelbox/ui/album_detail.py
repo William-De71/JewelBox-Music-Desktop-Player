@@ -30,7 +30,9 @@ class AlbumDetailPage(Gtk.Stack):
         self._app = application
         self._album_id = album_id
         self._album = None
-        self._track_rows = {}   # track_id → (row, play_icon, position_label)
+        self._track_rows = {}   # track_id → (row, play_button, position_label)
+        self._current_track_id = None  # piste en cours d'après PlaybackSession
+        self._is_playing = False       # cette piste joue-t-elle (vs pause) ?
         # Appelé avec le titre de l'album une fois chargé, pour que la
         # NavigationPage englobante affiche le vrai titre plutôt qu'un
         # texte générique le temps du chargement.
@@ -110,19 +112,12 @@ class AlbumDetailPage(Gtk.Stack):
         outer.append(header)
         outer.append(self._tracks_box)
 
-        scrolled = Gtk.ScrolledWindow(child=outer, hscrollbar_policy=Gtk.PolicyType.NEVER)
-
-        # Adw.NavigationPage ne fournit PAS de barre d'en-tête toute faite :
-        # c'est à la page elle-même de porter une Adw.HeaderBar (le bouton
-        # retour y apparaît automatiquement une fois dans un NavigationView).
-        # Les boutons de décoration de fenêtre (réduire/agrandir/fermer)
-        # restent uniquement sur la barre du shell externe, sinon ils
-        # apparaissent en double sur la fiche album.
-        header_bar = Adw.HeaderBar(
-            show_start_title_buttons=False, show_end_title_buttons=False)
-        toolbar_view = Adw.ToolbarView(content=scrolled)
-        toolbar_view.add_top_bar(header_bar)
-        return toolbar_view
+        # Pas de barre d'en-tête propre à la fiche : la barre du shell externe
+        # (sélecteur d'onglets + menu + bouton retour révélé à l'empilement)
+        # reste visible au-dessus du NavigationView sur toutes les pages. Une
+        # Adw.HeaderBar interne ferait doublon sous elle et resterait vide.
+        return Gtk.ScrolledWindow(
+            child=outer, hscrollbar_policy=Gtk.PolicyType.NEVER)
 
     # ── Chargement ───────────────────────────────────────────────────────────
 
@@ -197,13 +192,16 @@ class AlbumDetailPage(Gtk.Stack):
 
         # Bouton de lecture toujours visible sur une piste jouable (parité
         # avec le bouton play des cartes Android) — pas seulement une icône
-        # d'état qui n'apparaîtrait qu'une fois la lecture commencée.
+        # d'état qui n'apparaîtrait qu'une fois la lecture commencée. Sur la
+        # piste en cours il devient un bouton pause/reprise (voir
+        # _on_playback_state et _on_track_button_clicked).
         play_button = Gtk.Button(
             icon_name='media-playback-start-symbolic', css_classes=['flat', 'circular'],
             valign=Gtk.Align.CENTER, tooltip_text=_('Lire'),
             visible=track.has_file)
         if track.has_file:
-            play_button.connect('clicked', lambda *_a: self._play(album, track.id))
+            play_button.connect(
+                'clicked', self._on_track_button_clicked, album, track.id)
         leading = Gtk.Box(width_request=44)
         leading.append(position_label)
         leading.append(play_button)
@@ -247,6 +245,17 @@ class AlbumDetailPage(Gtk.Stack):
         if playback is not None:
             playback.play_album(album, track_id)
 
+    def _on_track_button_clicked(self, _button, album, track_id):
+        # Sur la piste déjà en cours, le bouton pilote pause/reprise ; sur une
+        # autre, il lance cette piste-là.
+        playback = self._app.playback
+        if playback is None:
+            return
+        if track_id == self._current_track_id:
+            playback.toggle_play_pause()
+        else:
+            playback.play_album(album, track_id)
+
     def _on_favorite_toggled(self, button, client, track_id):
         is_favorite = button.get_active()
         button.set_icon_name(
@@ -263,16 +272,22 @@ class AlbumDetailPage(Gtk.Stack):
     # ── Surbrillance de la piste en cours ────────────────────────────────────
 
     def _on_playback_state(self, state):
+        self._current_track_id = state.current_track_id
+        self._is_playing = state.is_playing
         for track_id, (row, play_button, position_label) in self._track_rows.items():
             is_current = state.current_track_id == track_id
-            # Piste en cours : numéro et bouton lecture cèdent la place à un
-            # indicateur d'égaliseur (parité avec l'icône « en lecture »
-            # d'Android) ; les autres gardent leur numéro + bouton lecture.
-            position_label.set_visible(not is_current)
-            play_button.set_icon_name(
-                'audio-volume-high-symbolic' if is_current
-                else 'media-playback-start-symbolic')
-            play_button.set_sensitive(not is_current)
+            # Piste en cours : le numéro reste affiché ; seul le bouton change
+            # (pause pendant la lecture, reprise en pause). Les autres gardent
+            # leur bouton lecture.
+            if is_current:
+                play_button.set_icon_name(
+                    'media-playback-pause-symbolic' if state.is_playing
+                    else 'media-playback-start-symbolic')
+                play_button.set_tooltip_text(
+                    _('Pause') if state.is_playing else _('Reprendre'))
+            else:
+                play_button.set_icon_name('media-playback-start-symbolic')
+                play_button.set_tooltip_text(_('Lire'))
             if not row.get_activatable():
                 continue
             if is_current:
