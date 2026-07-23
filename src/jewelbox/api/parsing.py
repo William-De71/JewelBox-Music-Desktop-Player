@@ -23,6 +23,7 @@ from jewelbox.api.models import (
     ServerInfo,
     SmartPlaylist,
     SmartPlaylistMeta,
+    SmartSummary,
     Track,
 )
 
@@ -242,11 +243,21 @@ def _parse_home_recent_item(data) -> HomeRecentItem:
     data = _require_dict(data, 'home-recent')
     album = data.get('album')
     playlist = data.get('playlist')
+    smart = data.get('smart')
     return HomeRecentItem(
         item_type=_str(data, 'item_type'),
         played_at=_opt_str(data, 'played_at'),
         album=parse_album(album) if isinstance(album, dict) else None,
         playlist=parse_playlist_summary(playlist) if isinstance(playlist, dict) else None,
+        smart=parse_smart_summary(smart) if isinstance(smart, dict) else None,
+    )
+
+
+def parse_smart_summary(data) -> SmartSummary:
+    data = _require_dict(data, 'smart')
+    return SmartSummary(
+        key=_str(data, 'key'),
+        track_count=_int(data, 'track_count'),
     )
 
 

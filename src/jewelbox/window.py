@@ -25,12 +25,18 @@ class JewelboxWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         self.set_title('JewelBox Music Player')
         self.set_default_size(1000, 700)
-        self.set_size_request(360, 294)
+        # Largeur plancher : le contenu le plus contraint (l'accueil, avec ses
+        # récents en deux colonnes) demande ~406 px au minimum. Un plancher
+        # inférieur laisserait le compositeur rétrécir la fenêtre sous ce
+        # minimum — contenu coupé à droite et warnings AdwToolbarView
+        # « exceeds width ».
+        self.set_size_request(420, 294)
 
         self._stack = Adw.ViewStack()
         self._home = HomePage(self.get_application())
         self._home.on_album_activated = self._open_album
         self._home.on_playlist_activated = self._open_playlist
+        self._home.on_smart_activated = self._open_smart_playlist
         self._stack.add_titled_with_icon(
             self._home, 'home', _('Accueil'), 'user-home-symbolic')
         self._library = LibraryPage(self.get_application())

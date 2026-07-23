@@ -5,9 +5,9 @@ bouton « Écouter »), puis la liste des pistes — numéro, pochette, titre/ar
 durée, bouton favori. Contrairement à une playlist utilisateur, on ne peut pas
 réordonner ni renommer : ces listes sont calculées par le serveur.
 
-Lancer une liste intelligente ne signale PAS d'historique : côté Android, les
-files intelligentes ne sont délibérément pas des entrées de récents. D'où
-l'absence de report_playlist_id sur play_queue_tracks ici.
+Lancer une liste intelligente signale l'historique via report_smart_key (sa
+clé texte) sur play_queue_tracks : elle apparaît alors dans « Récemment écouté »
+de l'accueil, au même titre qu'un album ou une playlist utilisateur.
 
 Le mix dynamique (clé dynamic_mix) est le seul modifiable : la barre du shell
 offre « Relancer un mix complet » (tire un tout nouveau tirage) et chaque piste
@@ -88,18 +88,22 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         return self._spec.label if self._spec is not None else self._key
 
     def _build_content(self):
+        # En-tête (CenterBox) : compteur de pistes à gauche, NOM de la liste
+        # centré, puis « Écouter » (et « Relancer » pour le mix) à droite.
         self._count_label = Gtk.Label(
-            xalign=0, hexpand=True, css_classes=['dim-label'])
+            xalign=0, css_classes=['dim-label'], valign=Gtk.Align.CENTER)
+        name_label = Gtk.Label(
+            label=self.title(), css_classes=['title-4'],
+            valign=Gtk.Align.CENTER,
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=40)
         self._play_button = Gtk.Button(
-            css_classes=['pill', 'suggested-action'])
+            css_classes=['pill', 'suggested-action'], valign=Gtk.Align.CENTER)
         self._play_button.set_child(Adw.ButtonContent(
             icon_name='media-playback-start-symbolic', label=_('Écouter')))
         self._play_button.connect('clicked', lambda *_a: self._play(0))
 
-        header = Gtk.Box(spacing=8, margin_top=16, margin_bottom=8,
-                         margin_start=24, margin_end=24)
-        header.append(self._count_label)
-        header.append(self._play_button)
+        end_box = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+        end_box.append(self._play_button)
 
         # Seul le mix dynamique se relance ; pour les autres listes, ce bouton
         # n'est pas ajouté (rien à recalculer côté client).
@@ -108,7 +112,13 @@ class SmartPlaylistDetailPage(Gtk.Stack):
                 icon_name='view-refresh-symbolic', valign=Gtk.Align.CENTER,
                 tooltip_text=_('Relancer un mix complet'), css_classes=['flat'])
             refresh.connect('clicked', lambda *_a: self._refresh_mix())
-            header.append(refresh)
+            end_box.append(refresh)
+
+        header = Gtk.CenterBox(
+            margin_top=16, margin_bottom=8, margin_start=24, margin_end=24)
+        header.set_start_widget(self._count_label)
+        header.set_center_widget(name_label)
+        header.set_end_widget(end_box)
 
         self._empty_label = Gtk.Label(
             label=_('Aucune piste jouable dans cette liste'),
@@ -168,14 +178,17 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         if self._playback is not None:
             self._on_playback_state(self._playback._build_state())
 
-    # ── Lecture (sans historique) ────────────────────────────────────────────
+    # ── Lecture ──────────────────────────────────────────────────────────────
 
     def _play(self, start_index: int):
         playback = self._app.playback
         if playback is None:
             return
-        # Pas de report_playlist_id : une file intelligente n'est pas un récent.
-        playback.play_queue_tracks(self._tracks, start_index=start_index)
+        # report_smart_key alimente les récents de l'accueil (une liste
+        # intelligente EST une entrée d'historique, repérée par sa clé).
+        playback.play_queue_tracks(
+            self._tracks, start_index=start_index,
+            report_smart_key=self._key, source_name=self.title())
 
     def _play_or_toggle(self, track_id):
         playback = self._app.playback

@@ -22,6 +22,7 @@ from gettext import gettext as _
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from jewelbox.api.client import ApiError
+from jewelbox.ui.smart_specs import smart_spec
 
 _RECENT_COVER_SIZE = 56
 _SUGGESTION_COVER_SIZE = 160
@@ -39,6 +40,52 @@ class _AlbumItem(GObject.Object):
         self.album = album
 
 
+class _SuggestionsClamp(Gtk.Widget):
+    """Enveloppe du GridView des suggestions, pour deux corrections de
+    géométrie que le widget ne sait pas faire lui-même :
+
+    - la largeur minimale rapportée est ramenée à deux colonnes : sans ça, le
+      min_columns dynamique (voir _fit_suggestions_columns) verrouillerait la
+      largeur minimale de la fenêtre au nombre de colonnes atteint en grand —
+      impossible ensuite de la rétrécir, le contenu débordant à droite
+      (warnings AdwToolbarView « exceeds width ») ;
+    - chaque allocation signale sa largeur à la page : c'est le seul point
+      fiable pour suivre un redimensionnement en GTK4 (aucun signal ni
+      propriété « width » sur les widgets). La largeur du GridView lui-même
+      peut être momentanément plus grande (clampée à son minimum le temps
+      qu'une réduction converge) : celle de l'enveloppe fait foi.
+
+    Gtk.Widget nu, sans gestionnaire de disposition : un conteneur à layout
+    manager (Box…) court-circuite les vfuncs do_measure / do_size_allocate."""
+
+    def __init__(self, grid, on_width_allocated):
+        super().__init__(overflow=Gtk.Overflow.HIDDEN)
+        self._grid = grid
+        self._on_width_allocated = on_width_allocated
+        grid.set_parent(self)
+
+    def do_get_request_mode(self):
+        return self._grid.get_request_mode()
+
+    def do_measure(self, orientation, for_size):
+        minimum, natural, min_baseline, nat_baseline = self._grid.measure(
+            orientation, for_size)
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            columns = max(1, self._grid.get_min_columns())
+            minimum = min(minimum, (minimum // columns) * 2)
+        return minimum, natural, min_baseline, nat_baseline
+
+    def do_size_allocate(self, width, height, baseline):
+        self._grid.allocate(width, height, baseline, None)
+        self._on_width_allocated(width)
+
+    def do_dispose(self):
+        if self._grid is not None:
+            self._grid.unparent()
+            self._grid = None
+        Gtk.Widget.do_dispose(self)
+
+
 class HomePage(Gtk.Stack):
     """États : message (sans serveur / erreur / vide), chargement, contenu.
     Le rechargement est déclenché par la fenêtre (affichage de l'onglet,
@@ -50,9 +97,10 @@ class HomePage(Gtk.Stack):
         self._app = application
         self._textures = {}          # url → Gdk.Texture (cache session)
         self._load_generation = 0
-        # Appelés avec l'id de l'élément activé.
+        # Appelés avec l'identifiant de l'élément activé (id, ou clé pour smart).
         self.on_album_activated = None
         self.on_playlist_activated = None
+        self.on_smart_activated = None
 
         # ── État « message » (sans serveur, erreur, accueil vide) ────────────
         self._status = Adw.StatusPage()
@@ -100,9 +148,22 @@ class HomePage(Gtk.Stack):
         )
         self._suggestions_grid.add_css_class('navigation-sidebar')
         self._suggestions_grid.connect('activate', self._on_suggestion_activated)
+        # Un GtkGridView calcule sa hauteur naturelle sur min_columns (2), donc
+        # pour beaucoup d'albums il réserve bien plus de lignes que la largeur
+        # n'en affiche — d'où un grand vide scrollable sous les suggestions. En
+        # alignant min_columns sur le nombre de colonnes réellement affichées, sa
+        # hauteur naturelle devient celle du nombre de lignes réel. La grille
+        # n'est PAS dans un ScrolledWindow (le scroll de la page marche partout)
+        # et sa disposition ne change pas — on ne corrige que le calcul de
+        # hauteur. L'enveloppe _SuggestionsClamp déclenche le recalcul à chaque
+        # allocation et garde la fenêtre rétrécissable (voir sa docstring).
+        self._fit_pending = False
+        self._fit_width = 0
+        self._suggestions_clamp = _SuggestionsClamp(
+            self._suggestions_grid, self._schedule_fit_suggestions)
 
         self._suggestions_group = self._build_group(
-            _('Suggestions'), self._suggestions_grid)
+            _('Suggestions'), self._suggestions_clamp)
 
         # Ligne « Derniers ajouts » : les albums les plus récemment enregistrés
         # sur le serveur, en rangée horizontale de pochettes carrées. Elle est
@@ -202,10 +263,12 @@ class HomePage(Gtk.Stack):
         if generation != self._load_generation:
             return
 
-        # Ne garder que les entrées récentes réellement ouvrables (album ou
-        # playlist présent), plafonnées à 8 comme le client Android.
+        # Ne garder que les entrées récentes réellement ouvrables (album,
+        # playlist ou liste intelligente), plafonnées à 8 comme le client
+        # Android.
         recent = [item for item in home.recent
-                  if item.album is not None or item.playlist is not None][:8]
+                  if item.album is not None or item.playlist is not None
+                  or item.smart is not None][:8]
 
         if not recent and not home.suggestions and not latest:
             self._show_status(
@@ -241,6 +304,7 @@ class HomePage(Gtk.Stack):
         self._suggestions_store.remove_all()
         for album in suggestions:
             self._suggestions_store.append(_AlbumItem(album))
+        self._schedule_fit_suggestions()
 
     def _show_status(self, icon, title, description, button_label,
                      button_action):
@@ -263,28 +327,53 @@ class HomePage(Gtk.Stack):
     # ── Section « Récemment écouté » ──────────────────────────────────────────
 
     def _build_recent_tile(self, client, item):
-        """Tuile horizontale compacte : petite pochette, titre, sous-titre
-        (artiste pour un album, nombre de pistes pour une playlist)."""
+        """Tuile horizontale compacte : petite pochette (ou icône dédiée pour
+        une liste intelligente), titre, sous-titre (artiste pour un album,
+        nombre de pistes pour une playlist / liste intelligente)."""
         album = item.album
         playlist = item.playlist
+        smart = item.smart
+        # Une liste intelligente n'a pas de pochette : son libellé et son icône
+        # sont résolus côté client à partir de la clé (miroir de l'app Android).
+        spec = smart_spec(smart.key) if smart is not None else None
 
-        cover = Gtk.Picture(
-            content_fit=Gtk.ContentFit.COVER,
-            width_request=_RECENT_COVER_SIZE,
-            height_request=_RECENT_COVER_SIZE,
-            overflow=Gtk.Overflow.HIDDEN,
-            valign=Gtk.Align.CENTER)
-        cover.add_css_class('jewelbox-cover')
+        def _track_count_label(count):
+            return (_('{count} pistes').format(count=count)
+                    if count != 1 else _('1 piste'))
 
         if album is not None:
             title = album.title
             subtitle = album.artist.name
             cover_url = client.resolve_cover(album.cover_url)
-        else:
+        elif playlist is not None:
             title = playlist.name
-            subtitle = (_('{count} pistes').format(count=playlist.track_count)
-                        if playlist.track_count != 1 else _('1 piste'))
+            subtitle = _track_count_label(playlist.track_count)
             cover_url = client.resolve_cover(playlist.cover_url)
+        else:
+            title = spec.label if spec is not None else smart.key
+            subtitle = _track_count_label(smart.track_count)
+            cover_url = None
+
+        if smart is not None:
+            # Vignette = icône symbolique de la liste intelligente, dans un
+            # cadre de la même taille que les pochettes voisines.
+            cover = Gtk.Image(
+                icon_name=(spec.icon if spec is not None
+                           else 'view-list-symbolic'),
+                pixel_size=_RECENT_COVER_SIZE // 2,
+                width_request=_RECENT_COVER_SIZE,
+                height_request=_RECENT_COVER_SIZE,
+                valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+            cover.add_css_class('jewelbox-cover')
+            cover.add_css_class('jewelbox-smart-tile')
+        else:
+            cover = Gtk.Picture(
+                content_fit=Gtk.ContentFit.COVER,
+                width_request=_RECENT_COVER_SIZE,
+                height_request=_RECENT_COVER_SIZE,
+                overflow=Gtk.Overflow.HIDDEN,
+                valign=Gtk.Align.CENTER)
+            cover.add_css_class('jewelbox-cover')
 
         if cover_url:
             cover._wanted_url = cover_url
@@ -293,10 +382,9 @@ class HomePage(Gtk.Stack):
                 task = self._load_cover(cover, cover_url)
                 asyncio.get_event_loop_policy().get_event_loop().create_task(task)
 
-        # Bouton « Lire l'album » en surimpression, seulement pour un album
-        # avec des pistes jouables (pas sur une playlist ni un album sans
-        # audio, où il ne lancerait rien). Variante compacte (.small) adaptée
-        # à la petite pochette de 56px.
+        # Bouton « Lire » en surimpression, pour un album avec des pistes
+        # jouables ou une liste intelligente (une playlist utilisateur n'en a
+        # pas ici). Variante compacte (.small) adaptée à la pochette de 56px.
         cover_widget = cover
         if album is not None and album.has_audio:
             play = Gtk.Button(
@@ -307,6 +395,17 @@ class HomePage(Gtk.Stack):
                 css_classes=['circular', 'jewelbox-cover-play',
                              'jewelbox-cover-play-small'])
             play.connect('clicked', self._on_recent_play_clicked, album.id)
+            cover_widget = Gtk.Overlay(child=cover, valign=Gtk.Align.CENTER)
+            cover_widget.add_overlay(play)
+        elif smart is not None and smart.track_count > 0:
+            play = Gtk.Button(
+                icon_name='media-playback-start-symbolic',
+                halign=Gtk.Align.END, valign=Gtk.Align.END,
+                margin_end=2, margin_bottom=2,
+                tooltip_text=_('Lire'),
+                css_classes=['circular', 'jewelbox-cover-play',
+                             'jewelbox-cover-play-small'])
+            play.connect('clicked', self._on_recent_smart_play_clicked, smart.key)
             cover_widget = Gtk.Overlay(child=cover, valign=Gtk.Align.CENTER)
             cover_widget.add_overlay(play)
 
@@ -337,20 +436,64 @@ class HomePage(Gtk.Stack):
         # clic (même motif que la fiche album).
         child._album_id = album.id if album is not None else None
         child._playlist_id = playlist.id if playlist is not None else None
+        child._smart_key = smart.key if smart is not None else None
         return child
 
     def _on_recent_activated(self, _flowbox, child):
         album_id = getattr(child, '_album_id', None)
         playlist_id = getattr(child, '_playlist_id', None)
+        smart_key = getattr(child, '_smart_key', None)
         if album_id is not None and self.on_album_activated is not None:
             self.on_album_activated(album_id)
         elif playlist_id is not None and self.on_playlist_activated is not None:
             self.on_playlist_activated(playlist_id)
+        elif smart_key is not None and self.on_smart_activated is not None:
+            self.on_smart_activated(smart_key)
 
     def _on_recent_play_clicked(self, _button, album_id):
         self._play_album(album_id)
 
+    def _on_recent_smart_play_clicked(self, _button, key):
+        self._play_smart(key)
+
     # ── Section « Suggestions » (grille d'albums) ─────────────────────────────
+
+    def _schedule_fit_suggestions(self, width=None):
+        """Planifie _fit_suggestions_columns en idle : appelé pendant
+        l'allocation (via _SuggestionsClamp) ou au peuplement, moments où
+        changer min_columns déclencherait une mise en page dans la mise en
+        page. Dédoublonné (plusieurs allocations par frame possibles)."""
+        if width is not None:
+            self._fit_width = width
+        if self._fit_pending:
+            return
+        self._fit_pending = True
+
+        def apply():
+            self._fit_pending = False
+            self._fit_suggestions_columns()
+            return False
+        GLib.idle_add(apply)
+
+    def _fit_suggestions_columns(self):
+        """Aligne min_columns du GridView sur le nombre de colonnes réellement
+        affichées, pour que sa hauteur naturelle corresponde aux lignes réelles
+        (sinon un grand vide subsiste sous les suggestions ; voir _build_content).
+        Ne change pas la disposition : la grille affiche déjà autant de colonnes
+        que la largeur permet."""
+        # Largeur de l'enveloppe, pas de la grille : pendant qu'une réduction
+        # converge, la grille reste clampée à son ancien minimum (plus large).
+        width = self._fit_width or self._suggestions_clamp.get_width()
+        if width <= 0 or self._suggestions_store.get_n_items() == 0:
+            return
+        grid = self._suggestions_grid
+        # Largeur d'une colonne mesurée sur la grille (min = min_columns
+        # colonnes), pour compter exactement comme GTK plutôt qu'estimer.
+        min_width = grid.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+        cell = max(1, min_width // max(1, grid.get_min_columns()))
+        columns = max(1, min(8, width // cell))
+        if grid.get_min_columns() != columns:
+            grid.set_min_columns(columns)
 
     def _on_card_setup(self, _factory, list_item):
         cover = Gtk.Picture(
@@ -383,10 +526,6 @@ class HomePage(Gtk.Stack):
                            max_width_chars=18,
                            css_classes=['caption', 'dim-label'])
 
-        # Cartes calées à gauche dans leur cellule : sur grand écran le GridView
-        # étale les colonnes, une carte centrée flotterait loin du bord et ne
-        # s'alignerait plus avec les sections « Récemment écouté » / « Derniers
-        # ajouts » au-dessus.
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
                        width_request=_SUGGESTION_COVER_SIZE,
                        halign=Gtk.Align.START)
@@ -404,9 +543,6 @@ class HomePage(Gtk.Stack):
         list_item.title.set_label(album.title)
         list_item.title.set_tooltip_text(album.title)
         list_item.artist.set_label(album.artist.name)
-        # Bouton « Lire l'album » seulement si l'album a des pistes jouables
-        # (has_audio fourni même en liste). La cellule étant recyclée, on
-        # repositionne la visibilité à chaque bind.
         list_item.play.set_visible(album.has_audio)
 
         cover = list_item.cover
@@ -517,6 +653,29 @@ class HomePage(Gtk.Stack):
         first = next((t for t in album.tracks if t.has_file), None)
         if first is not None:
             playback.play_album(album, first.id)
+
+    # ── Lecture d'une liste intelligente depuis une tuile ─────────────────────
+
+    def _play_smart(self, key):
+        # Les tuiles smart de l'accueil ne portent que la clé : on charge les
+        # pistes avant de lancer, en signalant l'historique par la clé.
+        task = self._load_and_play_smart(key)
+        asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+    async def _load_and_play_smart(self, key):
+        client = self._app.get_client()
+        playback = self._app.playback
+        if client is None or playback is None:
+            return
+        try:
+            smart = await client.smart_playlist(key)
+        except ApiError:
+            return  # best-effort, comme le reste de l'app
+        if smart.tracks:
+            spec = smart_spec(key)
+            playback.play_queue_tracks(
+                smart.tracks, report_smart_key=key,
+                source_name=spec.label if spec is not None else key)
 
     # ── Pochettes ─────────────────────────────────────────────────────────────
 

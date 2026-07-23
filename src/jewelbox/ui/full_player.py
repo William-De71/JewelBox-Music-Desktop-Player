@@ -138,11 +138,17 @@ class FullPlayerPage(Gtk.Box):
         self._album_label = Gtk.Label(
             css_classes=['dim-label'], halign=Gtk.Align.CENTER, visible=False,
             ellipsize=Pango.EllipsizeMode.END)
+        # Nom de la playlist / liste intelligente d'où vient la lecture ; masqué
+        # pour un album ou une piste seule.
+        self._source_label = Gtk.Label(
+            css_classes=['caption', 'dim-label'], halign=Gtk.Align.CENTER,
+            visible=False, margin_top=8, ellipsize=Pango.EllipsizeMode.END)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.append(title_row)
         box.append(self._artist_label)
         box.append(self._album_label)
+        box.append(self._source_label)
         return box
 
     # ── Barre de recherche + temps ───────────────────────────────────────────
@@ -258,6 +264,10 @@ class FullPlayerPage(Gtk.Box):
         self._artist_label.set_label(state.artist or '')
         self._album_label.set_label(state.album or '')
         self._album_label.set_visible(bool(state.album))
+        self._source_label.set_label(
+            _('Depuis : {name}').format(name=state.source_name)
+            if state.source_name else '')
+        self._source_label.set_visible(bool(state.source_name))
 
         self._play_pause_button.set_icon_name(
             'media-playback-pause-symbolic' if state.is_playing

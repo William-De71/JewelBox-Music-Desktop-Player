@@ -151,14 +151,24 @@ class SearchResults:
 
 
 @dataclass(frozen=True)
+class SmartSummary:
+    """Résumé d'une liste intelligente dans les récents : le libellé et l'icône
+    sont résolus côté client à partir de la clé (cf. ui/smart_specs)."""
+
+    key: str = ''
+    track_count: int = 0
+
+
+@dataclass(frozen=True)
 class HomeRecentItem:
-    """Entrée de la section « récents » : exactement un des deux champs
-    album/playlist est renseigné, selon item_type."""
+    """Entrée de la section « récents » : exactement un des champs
+    album/playlist/smart est renseigné, selon item_type."""
 
     item_type: str = ''
     played_at: str | None = None
     album: Album | None = None
     playlist: PlaylistSummary | None = None
+    smart: SmartSummary | None = None
 
 
 @dataclass(frozen=True)
