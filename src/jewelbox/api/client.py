@@ -134,6 +134,12 @@ class JewelBoxClient:
         await self._post('/api/player/history',
                          {'item_type': item_type, 'item_id': item_id})
 
+    async def report_smart_play(self, key: str) -> None:
+        """Signale un début de lecture d'une liste intelligente, identifiée par
+        sa clé texte (les smart playlists n'ont pas d'id numérique)."""
+        await self._post('/api/player/history',
+                         {'item_type': 'smart', 'item_key': key})
+
     # ── Pistes ───────────────────────────────────────────────────────────────
 
     def stream_url(self, track_id: int) -> str:

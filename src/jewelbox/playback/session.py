@@ -33,6 +33,9 @@ class PlaybackUiState:
     artist: str | None = None
     album: str | None = None
     cover_url: str | None = None
+    # Nom de la source d'où vient la file (playlist utilisateur ou liste
+    # intelligente) ; None pour un album ou une piste seule.
+    source_name: str | None = None
     is_favorite: bool = False
     has_next: bool = False
     has_previous: bool = False
@@ -91,6 +94,9 @@ class PlaybackSession:
         # Ignore le tout premier STREAM_START, celui du load initial : la file
         # est déjà positionnée sur la bonne piste, rien à avancer.
         self._stream_started_once = False
+        # Nom de la source de la file en cours (playlist ou liste intelligente),
+        # affiché dans les lecteurs ; None pour un album ou une piste seule.
+        self._source_name: str | None = None
 
     # ── Démarrage d'une lecture ──────────────────────────────────────────────
 
@@ -109,19 +115,25 @@ class PlaybackSession:
                 for track in playable]
         start_index = next(
             (i for i, t in enumerate(playable) if t.id == start_track_id), 0)
+        # Un album n'affiche pas de nom de source dans les lecteurs.
+        self._source_name = None
         self._queue.load(items, start_index=start_index)
         self._start_current(client)
         self._report_play_started('album', album.id)
 
     def play_queue_tracks(self, tracks, start_index: int = 0,
-                          report_playlist_id: int | None = None):
+                          report_playlist_id: int | None = None,
+                          report_smart_key: str | None = None,
+                          source_name: str | None = None):
         """Pour playlists / smart playlists : tracks au format QueueTrack
         (déjà porteurs d'album/artiste), seules les pistes jouables gardées.
 
-        report_playlist_id, s'il est fourni, signale au serveur le début de
-        lecture d'une playlist utilisateur (alimente les récents de l'accueil).
-        On ne le passe PAS pour les smart playlists : côté Android, les files
-        intelligentes ne sont délibérément pas des entrées d'historique."""
+        report_playlist_id (playlist utilisateur) ou report_smart_key (liste
+        intelligente), s'il est fourni, signale au serveur le début de lecture
+        pour alimenter les récents de l'accueil. Un seul des deux à la fois.
+
+        source_name est le nom affiché dans les lecteurs (playlist ou liste
+        intelligente en cours)."""
         client = self._get_client()
         if client is None:
             return
@@ -133,10 +145,13 @@ class PlaybackSession:
                     client.stream_url(track.id),
                     client.resolve_cover(track.cover_url))
                 for track in playable]
+        self._source_name = source_name
         self._queue.load(items, start_index=start_index)
         self._start_current(client)
         if report_playlist_id is not None:
             self._report_play_started('playlist', report_playlist_id)
+        elif report_smart_key is not None:
+            self._report_play_started('smart', report_smart_key)
 
     def _start_current(self, client):
         current = self._queue.state().current
@@ -293,14 +308,18 @@ class PlaybackSession:
 
     # ── Historique d'accueil ─────────────────────────────────────────────────
 
-    def _report_play_started(self, item_type, item_id):
+    def _report_play_started(self, item_type, item_ref):
+        # item_ref : id numérique pour album/playlist, clé texte pour smart.
         client = self._get_client()
         if client is not None:
-            self._run(self._report_play(client, item_type, item_id))
+            self._run(self._report_play(client, item_type, item_ref))
 
-    async def _report_play(self, client, item_type, item_id):
+    async def _report_play(self, client, item_type, item_ref):
         try:
-            await client.report_play(item_type, item_id)
+            if item_type == 'smart':
+                await client.report_smart_play(item_ref)
+            else:
+                await client.report_play(item_type, item_ref)
         except ApiError:
             pass
 
@@ -336,6 +355,7 @@ class PlaybackSession:
             artist=current.artist_name if current else None,
             album=current.album_title if current else None,
             cover_url=current.cover_url if current else None,
+            source_name=self._source_name if state.has_item else None,
             is_favorite=current.is_favorite if current else False,
             has_next=self._queue.has_next(),
             has_previous=self._queue.has_previous(),

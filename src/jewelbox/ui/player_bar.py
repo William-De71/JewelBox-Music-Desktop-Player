@@ -15,10 +15,116 @@ dans une phase dédiée. Masquée tant qu'aucune piste n'a été chargée
 import asyncio
 from gettext import gettext as _
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+
+# Largeur (px) de la zone texte titre/artiste. Bornée pour qu'un titre long ne
+# rogne jamais la zone centrale (contrôles + barre de progression).
+_INFO_TEXT_WIDTH = 260
+
+
+class _ScrollingLabel(Gtk.ScrolledWindow):
+    """Label de largeur fixe dont le texte défile horizontalement en boucle
+    quand il dépasse la largeur disponible ; sinon il s'affiche normalement,
+    calé à gauche. GTK4 n'a pas de marquee natif : on anime l'ajustement
+    horizontal d'un ScrolledWindow (barres masquées) via un timer.
+
+    Le défilement fait un aller-retour avec une pause à chaque extrémité, ce
+    qui reste lisible sans jamais tronquer ni élargir la zone (donc le centre
+    de la CenterBox n'est jamais rogné)."""
+
+    _STEP_PX = 1            # pixels par tick
+    _TICK_MS = 20           # période du timer (~50 fps)
+    _EDGE_PAUSE_MS = 1500   # pause aux extrémités
+
+    def __init__(self, width, css_classes=None):
+        super().__init__(
+            hscrollbar_policy=Gtk.PolicyType.EXTERNAL,
+            vscrollbar_policy=Gtk.PolicyType.NEVER,
+            width_request=width, halign=Gtk.Align.START,
+            valign=Gtk.Align.CENTER)
+        self._label = Gtk.Label(
+            xalign=0, halign=Gtk.Align.START,
+            css_classes=css_classes or [])
+        self.set_child(self._label)
+        self._tick_id = None
+        self._pause_id = None
+        self._direction = 1     # 1 = vers la gauche (avance), -1 = retour
+        # Relancer l'évaluation quand le texte change.
+        self._label.connect('notify::label', lambda *_: self._restart())
+        # Ne pas animer hors écran (mini-lecteur masqué par le grand lecteur) :
+        # on stoppe à l'unmap et on réévalue au map.
+        self.connect('map', lambda *_: self._restart())
+        self.connect('unmap', lambda *_: self._stop())
+
+    def set_label(self, text):
+        # Le changement de texte déclenche notify::label → _restart() ; si le
+        # texte est identique, aucun signal, donc rien à réévaluer.
+        self._label.set_label(text or '')
+
+    def _restart(self):
+        self._stop()
+        # Différer : à l'instant du set_label la largeur naturelle du label
+        # n'est pas encore recalculée. On mesure au prochain cycle idle.
+        GLib.idle_add(self._maybe_start, priority=GLib.PRIORITY_LOW)
+
+    def _overflow(self):
+        # Largeur naturelle du texte moins la largeur visible de la fenêtre.
+        min_w, nat_w = self._label.get_preferred_size()
+        return nat_w.width - self.get_width()
+
+    def _maybe_start(self):
+        # Retenter tant que le widget n'est pas mesuré, mais seulement s'il est
+        # à l'écran : hors écran, on abandonne (le map relancera _restart()).
+        if self.get_width() <= 0:
+            return self.get_mapped()
+        adj = self.get_hadjustment()
+        adj.set_value(0)
+        self._direction = 1
+        if self._overflow() > 0 and self._tick_id is None and self._pause_id is None:
+            # Petite pause avant de démarrer, puis on lance le défilement.
+            self._pause_id = GLib.timeout_add(
+                self._EDGE_PAUSE_MS, self._begin_scroll)
+        return False
+
+    def _begin_scroll(self):
+        self._pause_id = None
+        self._tick_id = GLib.timeout_add(self._TICK_MS, self._tick)
+        return False
+
+    def _tick(self):
+        adj = self.get_hadjustment()
+        max_value = max(0, self._overflow())
+        value = adj.get_value() + self._direction * self._STEP_PX
+        if value >= max_value:
+            adj.set_value(max_value)
+            self._pause_then_reverse(-1)
+            return False
+        if value <= 0:
+            adj.set_value(0)
+            self._pause_then_reverse(1)
+            return False
+        adj.set_value(value)
+        return True
+
+    def _pause_then_reverse(self, new_direction):
+        self._tick_id = None
+        def resume():
+            self._pause_id = None
+            self._direction = new_direction
+            self._tick_id = GLib.timeout_add(self._TICK_MS, self._tick)
+            return False
+        self._pause_id = GLib.timeout_add(self._EDGE_PAUSE_MS, resume)
+
+    def _stop(self):
+        if self._tick_id is not None:
+            GLib.source_remove(self._tick_id)
+            self._tick_id = None
+        if self._pause_id is not None:
+            GLib.source_remove(self._pause_id)
+            self._pause_id = None
 
 
 class PlayerBar(Gtk.CenterBox):
@@ -74,16 +180,27 @@ class PlayerBar(Gtk.CenterBox):
         cover_frame.set_child(placeholder)
         cover_frame.add_overlay(self._cover)
 
-        # Jamais tronqué : pas d'ellipsize ni de max_width_chars, le titre et
-        # l'artiste s'affichent en entier (le label prend la largeur qu'il
-        # faut, la zone info garde sa taille naturelle dans la CenterBox).
-        self._title_label = Gtk.Label(xalign=0, css_classes=['heading'])
+        # Largeur bornée pour la zone titre/artiste : dans la CenterBox, une
+        # zone start qui grandit vole l'espace du centre (contrôles + curseur).
+        # Le titre défile horizontalement quand il dépasse cette largeur (voir
+        # _ScrollingLabel), l'artiste (généralement court) est simplement tronqué.
+        self._title_label = _ScrollingLabel(
+            width=_INFO_TEXT_WIDTH, css_classes=['heading'])
         self._artist_label = Gtk.Label(
-            xalign=0, css_classes=['caption', 'dim-label'])
+            xalign=0, css_classes=['caption', 'dim-label'],
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=1,
+            width_request=_INFO_TEXT_WIDTH, halign=Gtk.Align.START)
+        # 3e ligne discrète : nom de la playlist / liste intelligente en cours ;
+        # masquée pour un album ou une piste seule.
+        self._source_label = Gtk.Label(
+            xalign=0, css_classes=['caption', 'dim-label'], visible=False,
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=1,
+            width_request=_INFO_TEXT_WIDTH, halign=Gtk.Align.START)
         labels = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
         labels.append(self._title_label)
         labels.append(self._artist_label)
+        labels.append(self._source_label)
 
         info = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         info.append(cover_frame)
@@ -299,6 +416,8 @@ class PlayerBar(Gtk.CenterBox):
 
         self._title_label.set_label(state.title or '')
         self._artist_label.set_label(state.artist or '')
+        self._source_label.set_label(state.source_name or '')
+        self._source_label.set_visible(bool(state.source_name))
         self._play_pause_button.set_icon_name(
             'media-playback-pause-symbolic' if state.is_playing
             else 'media-playback-start-symbolic')

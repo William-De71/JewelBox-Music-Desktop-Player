@@ -288,6 +288,22 @@ def test_home_recent_album_and_playlist():
     assert home.suggestions[0].id == 7
 
 
+def test_home_recent_smart():
+    home = parsing.parse_home({
+        'recent': [
+            {'item_type': 'smart', 'played_at': '2026-07-20T09:00:00Z',
+             'smart': {'key': 'favourites', 'track_count': 12}},
+        ],
+        'suggestions': [],
+    })
+    entry = home.recent[0]
+    assert entry.item_type == 'smart'
+    assert entry.smart.key == 'favourites'
+    assert entry.smart.track_count == 12
+    assert entry.album is None
+    assert entry.playlist is None
+
+
 def test_home_empty():
     home = parsing.parse_home({})
     assert home.recent == ()

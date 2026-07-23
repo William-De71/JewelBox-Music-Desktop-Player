@@ -90,14 +90,19 @@ class PlaylistDetailPage(Gtk.Stack):
             self._subscribed = False
 
     def _build_content(self):
-        # En-tête : compteur de pistes à gauche, puis « Écouter » et les
-        # boutons de gestion (renommer / supprimer) à droite. La barre du shell
-        # étant partagée par toutes les pages, on pose ces actions dans l'en-tête
-        # de la fiche plutôt que dans le header global.
+        # En-tête (CenterBox) : compteur de pistes à gauche, NOM de la playlist
+        # centré, puis « Écouter » et les boutons de gestion (renommer /
+        # supprimer) à droite. La barre du shell étant partagée par toutes les
+        # pages, on pose ces actions dans l'en-tête de la fiche.
         self._count_label = Gtk.Label(
-            xalign=0, hexpand=True, css_classes=['dim-label'])
+            xalign=0, css_classes=['dim-label'], valign=Gtk.Align.CENTER)
+        # Nom centré : tronqué s'il est long, pour ne pas pousser le compteur ni
+        # les boutons (l'en-tête garde sa disposition à trois zones).
+        self._name_label = Gtk.Label(
+            css_classes=['title-4'], valign=Gtk.Align.CENTER,
+            ellipsize=Pango.EllipsizeMode.END, max_width_chars=40)
         self._play_button = Gtk.Button(
-            css_classes=['pill', 'suggested-action'])
+            css_classes=['pill', 'suggested-action'], valign=Gtk.Align.CENTER)
         play_content = Adw.ButtonContent(
             icon_name='media-playback-start-symbolic', label=_('Écouter'))
         self._play_button.set_child(play_content)
@@ -112,12 +117,16 @@ class PlaylistDetailPage(Gtk.Stack):
             tooltip_text=_('Supprimer'), css_classes=['flat'])
         delete.connect('clicked', lambda *_a: self._prompt_delete())
 
-        header = Gtk.Box(spacing=8, margin_top=16, margin_bottom=8,
-                         margin_start=24, margin_end=24)
-        header.append(self._count_label)
-        header.append(self._play_button)
-        header.append(rename)
-        header.append(delete)
+        end_box = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+        end_box.append(self._play_button)
+        end_box.append(rename)
+        end_box.append(delete)
+
+        header = Gtk.CenterBox(
+            margin_top=16, margin_bottom=8, margin_start=24, margin_end=24)
+        header.set_start_widget(self._count_label)
+        header.set_center_widget(self._name_label)
+        header.set_end_widget(end_box)
 
         # Message affiché à la place de la liste quand la playlist est vide.
         self._empty_label = Gtk.Label(
@@ -165,6 +174,7 @@ class PlaylistDetailPage(Gtk.Stack):
         self._playlist = playlist
         if self.on_title_known is not None:
             self.on_title_known(playlist.name)
+        self._name_label.set_label(playlist.name)
 
         count = len(playlist.tracks)
         self._count_label.set_label(
@@ -196,7 +206,8 @@ class PlaylistDetailPage(Gtk.Stack):
             return
         playback.play_queue_tracks(
             self._playlist.tracks, start_index=start_index,
-            report_playlist_id=self._playlist_id)
+            report_playlist_id=self._playlist_id,
+            source_name=self._playlist.name)
 
     def _play_or_toggle(self, track_id):
         playback = self._app.playback
