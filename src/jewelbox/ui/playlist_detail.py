@@ -261,8 +261,8 @@ class PlaylistDetailPage(Gtk.Stack):
         favorite_button = Gtk.ToggleButton(
             active=track.is_favorite, valign=Gtk.Align.CENTER,
             css_classes=['flat'], tooltip_text=_('Favori'),
-            icon_name=('starred-symbolic' if track.is_favorite
-                      else 'non-starred-symbolic'))
+            icon_name=('jewelbox-favorite-symbolic' if track.is_favorite
+                      else 'jewelbox-not-favorite-symbolic'))
         favorite_button.connect(
             'toggled', self._on_favorite_toggled, client, track.id)
 
@@ -449,7 +449,8 @@ class PlaylistDetailPage(Gtk.Stack):
     def _on_favorite_toggled(self, button, client, track_id):
         is_favorite = button.get_active()
         button.set_icon_name(
-            'starred-symbolic' if is_favorite else 'non-starred-symbolic')
+            'jewelbox-favorite-symbolic' if is_favorite
+            else 'jewelbox-not-favorite-symbolic')
         task = self._set_favorite(client, track_id, is_favorite)
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
 
