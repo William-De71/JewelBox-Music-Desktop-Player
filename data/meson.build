@@ -37,3 +37,16 @@ install_data('icons/hicolor/scalable/apps' / app_id + '.svg',
 install_data('icons/hicolor/symbolic/apps' / app_id + '-symbolic.svg',
   install_dir: get_option('datadir') / 'icons/hicolor/symbolic/apps',
 )
+
+# Cœurs favori/non-favori : Adwaita ne fournit qu'un cœur plein
+# (emote-love-symbolic) et aucune variante contour, d'où ces deux icônes
+# maison pour rester en parité avec le client Android. Elles vont dans
+# symbolic/apps : c'est le seul répertoire symbolique déclaré par l'index.theme
+# de hicolor, donc le seul où GTK sait les résoudre.
+install_data(
+  [
+    'icons/hicolor/symbolic/apps/jewelbox-favorite-symbolic.svg',
+    'icons/hicolor/symbolic/apps/jewelbox-not-favorite-symbolic.svg',
+  ],
+  install_dir: get_option('datadir') / 'icons/hicolor/symbolic/apps',
+)

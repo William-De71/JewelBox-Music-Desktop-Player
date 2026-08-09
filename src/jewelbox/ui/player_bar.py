@@ -309,7 +309,7 @@ class PlayerBar(Gtk.CenterBox):
 
     def _build_right(self):
         self._favorite_button = Gtk.ToggleButton(
-            icon_name='non-starred-symbolic', css_classes=['flat'],
+            icon_name='jewelbox-not-favorite-symbolic', css_classes=['flat'],
             valign=Gtk.Align.CENTER, tooltip_text=_('Favori'))
         self._favorite_button.connect('toggled', self._on_favorite_toggled)
 
@@ -440,7 +440,8 @@ class PlayerBar(Gtk.CenterBox):
         self._updating_favorite = True
         self._favorite_button.set_active(state.is_favorite)
         self._favorite_button.set_icon_name(
-            'starred-symbolic' if state.is_favorite else 'non-starred-symbolic')
+            'jewelbox-favorite-symbolic' if state.is_favorite
+            else 'jewelbox-not-favorite-symbolic')
         self._favorite_button.set_css_classes(
             ['flat', 'error'] if state.is_favorite else ['flat'])
         self._updating_favorite = False

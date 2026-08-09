@@ -38,7 +38,7 @@ def smart_specs() -> tuple[SmartSpec, ...]:
         SmartSpec('last_played', 'alarm-symbolic', _('Écoutées récemment')),
         SmartSpec('most_played', 'view-list-ordered-symbolic',
                   _('Les plus écoutées')),
-        SmartSpec('favourites', 'emblem-favorite-symbolic', _('Favoris')),
+        SmartSpec('favourites', 'jewelbox-favorite-symbolic', _('Favoris')),
         SmartSpec('all_tracks', 'folder-music-symbolic',
                   _('Toutes les pistes')),
         SmartSpec(DYNAMIC_MIX_KEY, 'media-playlist-shuffle-symbolic',
