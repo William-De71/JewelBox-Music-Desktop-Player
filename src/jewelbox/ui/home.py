@@ -29,6 +29,10 @@ _SUGGESTION_COVER_SIZE = 160
 _LATEST_COVER_SIZE = 120
 # Nombre de derniers albums enregistrés affichés en tête des suggestions.
 _LATEST_COUNT = 5
+# Hauteur d'une barre de défilement horizontale non superposée (mesurée sur le
+# thème Adwaita : 24 px). Réservée sous la rangée « Derniers ajouts », voir le
+# commentaire de son ScrolledWindow.
+_SCROLLBAR_RESERVE = 24
 
 
 class _AlbumItem(GObject.Object):
@@ -173,6 +177,14 @@ class HomePage(Gtk.Stack):
         # Même retrait à gauche que les cellules du GridView Suggestions, pour
         # que les pochettes des deux sections s'alignent (voir style.css).
         self._latest_box.add_css_class('jewelbox-latest-row')
+        # Marge basse réservée à la barre de défilement horizontale.
+        # propagate_natural_height ne propage que la hauteur du CONTENU : elle
+        # ignore la barre. Quand le système désactive les barres en
+        # superposition (gtk-overlay-scrolling = false), la barre s'installe
+        # alors dans les derniers pixels de la rangée et tranche les titres en
+        # deux dans le sens de la hauteur. Cette marge lui donne sa place, et
+        # ne coûte qu'un peu d'air quand les barres sont en superposition.
+        self._latest_box.set_margin_bottom(_SCROLLBAR_RESERVE)
         latest_scroller = Gtk.ScrolledWindow(
             child=self._latest_box,
             vscrollbar_policy=Gtk.PolicyType.NEVER,
