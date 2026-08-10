@@ -73,19 +73,35 @@ class JewelboxApplication(Adw.Application):
         self._load_dev_icons()
         # GStreamer/playbin3 : construit une seule fois, indépendant de la
         # fenêtre (la lecture pourrait un jour continuer fenêtre fermée).
+        from jewelbox.core.playback_state import PlaybackStateStore
         from jewelbox.playback.session import PlaybackSession
-        self.playback = PlaybackSession(self.get_client)
+        self.playback = PlaybackSession(
+            self.get_client,
+            state_store=PlaybackStateStore(GLib.get_user_data_dir()))
         self.settings = _load_settings()
         # Identité de cet appareil (en-tête X-Device-Id) : générée une seule
         # fois, jamais régénérée — le serveur y attache la file de lecture.
         self.device_id = ensure_device_id(self.settings.get_string('device-id'))
         self.settings.set_string('device-id', self.device_id)
+        # Reprise là où l'écoute s'était arrêtée : la file revient chargée et
+        # en pause. Après les réglages (restore() a besoin du serveur courant
+        # via get_client) et avant la fenêtre, pour que le mini-lecteur soit
+        # déjà correct à l'affichage.
+        self.playback.restore()
 
     def do_activate(self):
         window = self.props.active_window
         if window is None:
             window = JewelboxWindow(application=self)
         window.present()
+
+    def do_shutdown(self):
+        # Dernier instantané avant de quitter : les sauvegardes en cours de
+        # route se font aux changements de piste et aux pauses, celle-ci
+        # capte la position exacte d'une lecture interrompue par la fermeture.
+        if self.playback is not None:
+            self.playback.save_now()
+        Adw.Application.do_shutdown(self)
 
     def _add_action(self, name, callback, accels=None):
         action = Gio.SimpleAction.new(name, None)

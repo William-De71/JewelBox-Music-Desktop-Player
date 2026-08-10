@@ -427,3 +427,58 @@ def test_from_saved_starts_with_shuffle_and_repeat_off():
     state = restored.state()
     assert not state.shuffle
     assert state.repeat == RepeatMode.OFF
+
+
+def test_to_saved_keeps_the_source_name():
+    queue = Queue()
+    queue.load(make_items(2))
+    saved = queue.to_saved('http://s:3001', source_type='smart',
+                           source_id='favourites', source_name='Favoris')
+    assert saved['source_name'] == 'Favoris'
+
+
+def test_to_saved_source_name_defaults_to_none():
+    queue = Queue()
+    queue.load(make_items(2))
+    assert queue.to_saved('http://s:3001')['source_name'] is None
+
+
+def test_from_saved_without_tracks_key_gives_empty_queue():
+    assert Queue.from_saved({}).state().current is None
+
+
+def test_from_saved_ignores_unknown_fields():
+    # Instantané écrit par une version plus récente, avec un champ en plus.
+    restored = Queue.from_saved({'tracks': [
+        {'track_id': 1, 'title': 'T', 'artist_name': 'A',
+         'album_title': 'Alb', 'stream_url': 'http://s/1', 'rating': 5},
+    ]})
+    assert restored.state().current.track_id == 1
+
+
+def test_from_saved_fills_missing_fields_with_defaults():
+    restored = Queue.from_saved({'tracks': [{'track_id': 7}]})
+    item = restored.state().current
+    assert item.track_id == 7
+    assert (item.title, item.artist_name, item.album_title) == ('', '', '')
+    assert item.cover_url is None
+    assert item.stream_url == ''
+    assert not item.is_favorite
+
+
+def test_from_saved_drops_entries_without_a_usable_id():
+    restored = Queue.from_saved({'tracks': [
+        {'track_id': 1, 'title': 'ok'},
+        {'title': 'sans id'},
+        {'track_id': 'deux'},
+        {'track_id': None},
+        'pas un objet',
+        {'track_id': 4, 'title': 'ok aussi'},
+    ]})
+    assert [i.track_id for i in restored.state().items] == [1, 4]
+
+
+def test_from_saved_clamps_an_out_of_range_index():
+    restored = Queue.from_saved({'tracks': [{'track_id': 1}, {'track_id': 2}],
+                                 'index': 99})
+    assert restored.state().current.track_id == 2
