@@ -43,6 +43,24 @@ class QueueItem:
     stream_url: str = ''
 
 
+def _item_from_saved(track: dict) -> 'QueueItem | None':
+    """Un QueueItem depuis une entrée sérialisée, ou None si elle n'est pas
+    exploitable. Ne retient que les champs connus : un instantané écrit par
+    une version plus récente (champ ajouté) reste lisible."""
+    track_id = track.get('track_id')
+    if not isinstance(track_id, int) or isinstance(track_id, bool):
+        return None
+    return QueueItem(
+        track_id=track_id,
+        title=str(track.get('title') or ''),
+        artist_name=str(track.get('artist_name') or ''),
+        album_title=str(track.get('album_title') or ''),
+        cover_url=track.get('cover_url') or None,
+        is_favorite=bool(track.get('is_favorite', False)),
+        stream_url=str(track.get('stream_url') or ''),
+    )
+
+
 @dataclass
 class QueueState:
     """Résultat exposé à l'appelant après chaque mutation : de quoi mettre
@@ -249,7 +267,8 @@ class Queue:
         )
 
     def to_saved(self, server_url: str, source_type=None, source_id=None,
-                dynamic_mix: bool = False, position_ms: int = 0) -> dict:
+                dynamic_mix: bool = False, position_ms: int = 0,
+                source_name=None) -> dict:
         """Snapshot pour la reprise au prochain lancement (miroir SavedQueue).
         L'ordre sauvegardé est celui d'affichage d'origine (_items), l'index
         pointe sur la piste courante dans cet ordre — le shuffle repart
@@ -266,14 +285,26 @@ class Queue:
             'position_ms': position_ms,
             'source_type': source_type,
             'source_id': source_id,
+            # Champ propre au client bureau (absent de SavedQueue côté
+            # Android, qui retrouve le nom via sa base locale) : le nom
+            # affiché sous le titre dans les lecteurs, à réafficher tel quel
+            # après une reprise plutôt que de redemander le serveur.
+            'source_name': source_name,
             'dynamic_mix': dynamic_mix,
         }
 
     @classmethod
     def from_saved(cls, saved: dict) -> 'Queue':
         """Reconstruit une file depuis to_saved() ; le shuffle/repeat
-        repartent à OFF (comme Android : seuls l'ordre et l'index survivent)."""
+        repartent à OFF (comme Android : seuls l'ordre et l'index survivent).
+
+        Tolérant aux instantanés écrits par une autre version : les clés
+        inconnues sont ignorées et les entrées inexploitables (piste sans id
+        ni titre) écartées, plutôt que de faire échouer toute la reprise."""
         queue = cls()
-        items = [QueueItem(**track) for track in saved.get('tracks', [])]
+        items = [item for item in
+                 (_item_from_saved(track) for track in saved.get('tracks', ())
+                  if isinstance(track, dict))
+                 if item is not None]
         queue.load(items, start_index=saved.get('index', 0))
         return queue
