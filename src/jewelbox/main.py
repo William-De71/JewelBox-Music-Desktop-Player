@@ -70,6 +70,7 @@ class JewelboxApplication(Adw.Application):
     def do_startup(self):
         Adw.Application.do_startup(self)
         self._load_css()
+        self._load_dev_icons()
         # GStreamer/playbin3 : construit une seule fois, indépendant de la
         # fenêtre (la lecture pourrait un jour continuer fenêtre fermée).
         from jewelbox.playback.session import PlaybackSession
@@ -92,6 +93,25 @@ class JewelboxApplication(Adw.Application):
         self.add_action(action)
         if accels:
             self.set_accels_for_action(f'app.{name}', accels)
+
+    def _load_dev_icons(self):
+        """Rend les icônes maison visibles en mode développement.
+
+        Les symboliques du projet (jewelbox-favorite-symbolic, etc.) sont
+        installées par Meson dans le thème hicolor du préfixe — donc présentes
+        dans le Flatpak, mais introuvables sous `make run`, qui lance les
+        sources sans passer par l'installation. GTK affichait alors l'icône
+        « image manquante » (une enveloppe) à la place du cœur des favoris.
+        On ajoute donc data/icons au chemin de recherche quand ce dossier est
+        là ; installé, le thème système fournit déjà les mêmes fichiers et ce
+        chemin n'existe pas."""
+        icons_dir = Path(__file__).resolve().parents[2] / 'data' / 'icons'
+        if not icons_dir.is_dir():
+            return
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        Gtk.IconTheme.get_for_display(display).add_search_path(str(icons_dir))
 
     def _load_css(self):
         provider = Gtk.CssProvider()

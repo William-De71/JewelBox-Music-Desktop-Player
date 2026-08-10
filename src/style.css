@@ -60,9 +60,14 @@
 }
 
 /* Mini-lecteur : layout et proportions calqués sur le mini-lecteur web
-   (player.css) — barre 72px, bouton lecture en pastille pleine, coins de
-   pochette arrondis à 4px comme .player-bar-cover. */
-.jewelbox-player-bar {
+   (player.css) — bouton lecture en pastille pleine, coins de pochette
+   arrondis à 4px comme .player-bar-cover.
+
+   Pas de min-height ici : la barre se replie en fenêtre étroite (pochette
+   réduite, progression masquée — voir les breakpoints de PlayerBar) et une
+   hauteur plancher la laisserait occuper 112px de vide. La hauteur vient
+   donc du contenu ; seule la variante large est calée explicitement. */
+.jewelbox-player-bar.jewelbox-player-bar-wide {
   min-height: 112px;
 }
 .jewelbox-player-bar .jewelbox-cover {

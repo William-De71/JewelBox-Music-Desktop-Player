@@ -15,14 +15,43 @@ dans une phase dédiée. Masquée tant qu'aucune piste n'a été chargée
 import asyncio
 from gettext import gettext as _
 
-from gi.repository import Gdk, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
 
-# Largeur (px) de la zone texte titre/artiste. Bornée pour qu'un titre long ne
-# rogne jamais la zone centrale (contrôles + barre de progression).
+
+def _strv(values):
+    """Liste de chaînes en GValue GStrv, seul type que Adw.Breakpoint.add_setter
+    accepte pour une propriété « css-classes »."""
+    value = GObject.Value(GObject.TYPE_STRV)
+    value.set_boxed(values)
+    return value
+
+# Largeur (px) de la zone texte titre/artiste en fenêtre large. Bornée pour
+# qu'un titre long ne rogne jamais la zone centrale (contrôles + progression).
 _INFO_TEXT_WIDTH = 260
+# Variante étroite : la zone texte cède la place aux contrôles de transport,
+# qui priment (on peut lire le titre dans le grand lecteur, pas mettre en pause).
+_INFO_TEXT_WIDTH_NARROW = 96
+_COVER_SIZE = 96
+_COVER_SIZE_NARROW = 48
+_VOLUME_WIDTH = 130
+
+# Paliers de repli, sur la largeur allouée au mini-lecteur lui-même. Les
+# valeurs viennent de la somme des zones à chaque étape (voir _build_*) : sous
+# chaque seuil, la barre ne tient plus sans rogner, donc on retire l'élément le
+# moins essentiel. En dessous du dernier palier ne restent que pochette, titre
+# et les trois boutons de transport indispensables.
+_BREAK_COMPACT = 900    # curseur de volume masqué, pochette et texte réduits
+_BREAK_TIGHT = 640      # aléatoire / répétition / favori masqués
+_BREAK_MINIMAL = 460    # barre de progression et minutages masqués
+
+# Largeur demandée par la barre entièrement repliée. Mesurée sur la CenterBox
+# au dernier palier (156 info + 122 transport + 76 muet/fermer + 32 marges) :
+# c'est le plancher que le mini-lecteur impose désormais à la fenêtre, contre
+# ~860 px avant le repli.
+_MIN_BAR_WIDTH = 386
 
 
 class _ScrollingLabel(Gtk.ScrolledWindow):
@@ -127,12 +156,26 @@ class _ScrollingLabel(Gtk.ScrolledWindow):
             self._pause_id = None
 
 
-class PlayerBar(Gtk.CenterBox):
+class PlayerBar(Adw.BreakpointBin):
+    """Barre de lecture repliable.
+
+    Adw.BreakpointBin plutôt que Gtk.CenterBox directement : la barre porte
+    beaucoup d'éléments de largeur fixe (pochette, zone texte, curseur de
+    volume) dont la somme — ~860 px — s'imposait comme largeur minimale à
+    TOUTE la fenêtre, puisqu'elle vit dans une barre du ToolbarView. Réduire
+    la fenêtre en dessous était impossible et le contenu des onglets se
+    retrouvait coupé à droite. Les breakpoints retirent progressivement le
+    superflu (volume, aléatoire/répétition/fermer, progression) pour que la
+    barre descende jusqu'à ~300 px sans jamais rogner le transport.
+
+    Le width_request déclaré est la largeur que la barre demande une fois
+    entièrement repliée (pochette 48 + titre 96 + trois boutons de transport
+    + muet + fermer + marges), mesurée et non estimée : la déclarer plus basse
+    ferait déborder la barre au lieu de la replier davantage."""
 
     def __init__(self, application):
         super().__init__(
-            visible=False, css_classes=['jewelbox-player-bar'],
-            margin_start=16, margin_end=16, margin_top=8, margin_bottom=8)
+            visible=False, width_request=_MIN_BAR_WIDTH, height_request=64)
         self._app = application
         self._seeking = False   # vrai pendant un glisser manuel du curseur
         self._cover_url = None
@@ -150,12 +193,89 @@ class PlayerBar(Gtk.CenterBox):
         # tick, réaffichant le mini-lecteur par-dessus le grand lecteur).
         self._suppressed = False
 
-        self.set_start_widget(self._build_info())
-        self.set_center_widget(self._build_center())
-        self.set_end_widget(self._build_right())
+        # -wide porte la hauteur plancher de la barre pleine ; le premier
+        # breakpoint la retire pour que la barre repliée suive son contenu.
+        self._bar = Gtk.CenterBox(
+            css_classes=['jewelbox-player-bar', 'jewelbox-player-bar-wide'],
+            margin_start=16, margin_end=16, margin_top=8, margin_bottom=8)
+        self._bar.set_start_widget(self._build_info())
+        self._bar.set_center_widget(self._build_center())
+        self._bar.set_end_widget(self._build_right())
+        self.set_child(self._bar)
+        self._add_breakpoints()
 
         if application.playback is not None:
             application.playback.add_listener(self._on_state)
+
+    def _add_breakpoints(self):
+        """Repli progressif, du moins au plus essentiel. Chaque palier hérite
+        des masquages du précédent : Adw.Breakpoint n'empile pas les setters,
+        donc chaque condition réapplique aussi ceux des paliers plus larges."""
+        compact = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {_BREAK_COMPACT}px'))
+        for widget, prop, value in self._compact_setters():
+            compact.add_setter(widget, prop, value)
+        self.add_breakpoint(compact)
+
+        tight = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {_BREAK_TIGHT}px'))
+        for widget, prop, value in (
+                *self._compact_setters(), *self._tight_setters()):
+            tight.add_setter(widget, prop, value)
+        self.add_breakpoint(tight)
+
+        minimal = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {_BREAK_MINIMAL}px'))
+        for widget, prop, value in (
+                *self._compact_setters(), *self._tight_setters(),
+                *self._minimal_setters()):
+            minimal.add_setter(widget, prop, value)
+        self.add_breakpoint(minimal)
+
+    def _compact_setters(self):
+        """Premier repli : le curseur de volume disparaît (le bouton muet
+        reste), la pochette et la zone texte rétrécissent."""
+        return (
+            # css-classes plutôt qu'add/remove_css_class : un setter de
+            # breakpoint ne sait poser que des propriétés GObject, et
+            # libadwaita restaure seul la liste d'origine au-dessus du seuil.
+            # La valeur doit être un GValue GStrv explicite : add_setter ne
+            # convertit pas une liste Python (« from value of type PyObject »).
+            (self._bar, 'css-classes', _strv(['jewelbox-player-bar'])),
+            (self._volume_scale, 'visible', False),
+            (self._cover_frame, 'width-request', _COVER_SIZE_NARROW),
+            (self._cover_frame, 'height-request', _COVER_SIZE_NARROW),
+            (self._cover, 'width-request', _COVER_SIZE_NARROW),
+            (self._cover, 'height-request', _COVER_SIZE_NARROW),
+            (self._title_label, 'width-request', _INFO_TEXT_WIDTH_NARROW),
+            (self._artist_label, 'width-request', _INFO_TEXT_WIDTH_NARROW),
+            (self._source_label, 'width-request', _INFO_TEXT_WIDTH_NARROW),
+        )
+
+    def _tight_setters(self):
+        """Deuxième repli : ne restent que précédent / lecture / suivant. Le
+        mode aléatoire, la répétition et le favori restent accessibles dans le
+        grand lecteur, qu'un clic sur la pochette ouvre.
+
+        Le bouton « fermer » est conservé, lui : il n'existe nulle part
+        ailleurs, et le masquer rendrait impossible d'arrêter la lecture en
+        fenêtre étroite."""
+        return (
+            (self._shuffle_button, 'visible', False),
+            (self._repeat_button, 'visible', False),
+            (self._favorite_button, 'visible', False),
+        )
+
+    def _minimal_setters(self):
+        """Dernier repli : plus de barre de progression ni de minutages — la
+        largeur restante suffit tout juste à la pochette, au titre et aux
+        boutons de transport.
+
+        Le bouton muet survit : le grand lecteur n'offre aucun réglage de
+        volume, c'est donc le seul accès au son dans l'application."""
+        return (
+            (self._progress_box, 'visible', False),
+        )
 
     # ── Zone gauche : pochette + infos ───────────────────────────────────────
 
@@ -165,7 +285,7 @@ class PlayerBar(Gtk.CenterBox):
         # l'étirer — sinon COVER produit un rectangle au lieu d'un carré.
         self._cover = Gtk.Picture(
             content_fit=Gtk.ContentFit.COVER,
-            width_request=96, height_request=96,
+            width_request=_COVER_SIZE, height_request=_COVER_SIZE,
             overflow=Gtk.Overflow.HIDDEN,
             halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
         # Icône disque en attendant/à défaut de pochette (parité avec le
@@ -173,12 +293,13 @@ class PlayerBar(Gtk.CenterBox):
         placeholder = Gtk.Image(
             icon_name='media-optical-symbolic', pixel_size=40,
             css_classes=['dim-label'])
-        cover_frame = Gtk.Overlay(
-            width_request=96, height_request=96,
+        # Attribut : les breakpoints rétrécissent le cadre en fenêtre étroite.
+        self._cover_frame = Gtk.Overlay(
+            width_request=_COVER_SIZE, height_request=_COVER_SIZE,
             halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
             css_classes=['jewelbox-cover'])
-        cover_frame.set_child(placeholder)
-        cover_frame.add_overlay(self._cover)
+        self._cover_frame.set_child(placeholder)
+        self._cover_frame.add_overlay(self._cover)
 
         # Largeur bornée pour la zone titre/artiste : dans la CenterBox, une
         # zone start qui grandit vole l'espace du centre (contrôles + curseur).
@@ -203,7 +324,7 @@ class PlayerBar(Gtk.CenterBox):
         labels.append(self._source_label)
 
         info = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
-        info.append(cover_frame)
+        info.append(self._cover_frame)
         info.append(labels)
 
         # Un clic sur la zone info ouvre le grand lecteur (parité avec le tap
@@ -288,10 +409,12 @@ class PlayerBar(Gtk.CenterBox):
         self._release_id = None
         self._seek_scale.connect('change-value', self._on_seek_change_value)
 
-        progress = Gtk.Box(spacing=8, hexpand=True)
-        progress.append(self._position_label)
-        progress.append(self._seek_scale)
-        progress.append(self._duration_label)
+        # Attribut : les breakpoints masquent toute la ligne de progression au
+        # palier le plus étroit.
+        self._progress_box = Gtk.Box(spacing=8, hexpand=True)
+        self._progress_box.append(self._position_label)
+        self._progress_box.append(self._seek_scale)
+        self._progress_box.append(self._duration_label)
 
         # Colonne centrale (contrôles au-dessus, progression dessous). Pas de
         # width_request rigide : la CenterBox donne d'abord aux zones start
@@ -302,7 +425,7 @@ class PlayerBar(Gtk.CenterBox):
             orientation=Gtk.Orientation.VERTICAL, spacing=2,
             halign=Gtk.Align.FILL, valign=Gtk.Align.CENTER, hexpand=True)
         center.append(controls)
-        center.append(progress)
+        center.append(self._progress_box)
         return center
 
     # ── Zone droite : favori · volume · fermer ───────────────────────────────
@@ -319,7 +442,8 @@ class PlayerBar(Gtk.CenterBox):
         self._volume_button.connect('clicked', self._on_volume_toggle)
 
         self._volume_scale = Gtk.Scale(
-            orientation=Gtk.Orientation.HORIZONTAL, width_request=130,
+            orientation=Gtk.Orientation.HORIZONTAL,
+            width_request=_VOLUME_WIDTH,
             draw_value=False, valign=Gtk.Align.CENTER)
         self._volume_scale.set_range(0, 1)
         self._volume_scale.set_value(1.0)
