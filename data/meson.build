@@ -20,6 +20,17 @@ metainfo_file = i18n.merge_file(
   install_dir: get_option('datadir') / 'metainfo',
 )
 
+# Le metainfo porte la version que voient les utilisateurs : elle doit suivre
+# celle du projet, sinon la release part avec une étiquette périmée.
+test('validate-version-sync',
+  python,
+  args: [
+    meson.current_source_dir() / 'check-version-sync.py',
+    meson.current_source_dir() / app_id + '.metainfo.xml.in',
+    meson.project_version(),
+  ],
+)
+
 install_data(app_id + '.gschema.xml',
   install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
 )
