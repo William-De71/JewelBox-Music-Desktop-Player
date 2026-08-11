@@ -47,7 +47,47 @@ fi
 sed -i "s/^\([[:space:]]*version:[[:space:]]*'\)[0-9]\+\.[0-9]\+\.[0-9]\+'/\1$V'/" meson.build
 grep -q "version: '$V'" meson.build || { echo "❌ Échec du bump de version dans meson.build"; exit 1; }
 
-git add meson.build
+# Insère la nouvelle entrée <release> en tête du metainfo. C'est cette entrée,
+# pas meson.build, qu'AppStream publie comme version courante (GNOME Logiciels,
+# `flatpak remote-ls`) : les deux ont divergé silencieusement de 0.1.0 à 0.6.0,
+# d'où ce bump automatique doublé du test meson « validate-version-sync ».
+METAINFO="data/io.github.william_de71.JewelBox.metainfo.xml.in"
+NOTES="${RELEASE_NOTES:-}"
+if [[ -z "$NOTES" ]]; then
+  if [[ -t 0 ]]; then
+    read -rp "📝 Notes de version pour $V (une phrase, visible dans GNOME Logiciels) : " NOTES
+  fi
+  NOTES="${NOTES:-Corrections et améliorations diverses.}"
+fi
+
+# Échappe les caractères spéciaux XML avant injection dans le document.
+NOTES_XML="$(printf '%s' "$NOTES" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')"
+
+python3 - "$METAINFO" "$V" "$(date +%F)" "$NOTES_XML" <<'PY'
+import sys
+
+path, version, date, notes = sys.argv[1:5]
+entry = (f'    <release version="{version}" date="{date}">\n'
+         f'      <description>\n'
+         f'        <p>{notes}</p>\n'
+         f'      </description>\n'
+         f'    </release>\n')
+
+with open(path, encoding='utf-8') as f:
+    content = f.read()
+
+marker = '  <releases>\n'
+if marker not in content:
+    sys.exit(f"❌ Bloc <releases> introuvable dans {path}")
+
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(content.replace(marker, marker + entry, 1))
+PY
+
+grep -q "release version=\"$V\"" "$METAINFO" \
+  || { echo "❌ Échec du bump de version dans $METAINFO"; exit 1; }
+
+git add meson.build "$METAINFO"
 git commit -m "$V"
 git tag "v$V"
 git push origin main "v$V"
