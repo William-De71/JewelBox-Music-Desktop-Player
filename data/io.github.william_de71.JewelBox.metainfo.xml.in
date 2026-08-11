@@ -39,6 +39,11 @@
     entrée automatiquement, et la CI échoue si les deux divergent.
   -->
   <releases>
+    <release version="0.6.1" date="2026-08-11">
+      <description>
+        <p>Correction de la version affichée dans GNOME Logiciels.</p>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-08-11">
       <description>
         <p>Reprise de la lecture là où elle s'était arrêtée, et fenêtre
