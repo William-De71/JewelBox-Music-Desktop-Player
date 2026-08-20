@@ -108,6 +108,12 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # occupe tout l'écran, comme le NowPlayingScreen mobile.
         self._full_player = FullPlayerPage(self.get_application())
         self._full_player.on_closed = self._close_full_player
+        # « Aller à l'album / la playlist » depuis le lecteur : on quitte le
+        # grand lecteur puis on empile la fiche, pour que le retour ramène aux
+        # onglets plutôt qu'au lecteur qu'on vient de fermer.
+        self._full_player.on_open_album = self._open_source_album
+        self._full_player.on_open_playlist = self._open_source_playlist
+        self._full_player.on_open_smart_playlist = self._open_source_smart
         self._full_player_page = Adw.NavigationPage(
             child=self._full_player, title=_('Lecture en cours'),
             tag='full-player')
@@ -187,6 +193,18 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # La file s'est vidée : dépile le grand lecteur s'il est ouvert.
         if self._nav.get_visible_page() is self._full_player_page:
             self._nav.pop()
+
+    def _open_source_album(self, album_id: int):
+        self._close_full_player()
+        self._open_album(album_id)
+
+    def _open_source_playlist(self, playlist_id: int):
+        self._close_full_player()
+        self._open_playlist(playlist_id)
+
+    def _open_source_smart(self, key: str):
+        self._close_full_player()
+        self._open_smart_playlist(key)
 
     def _open_album(self, album_id: int):
         page = AlbumDetailPage(self.get_application(), album_id)

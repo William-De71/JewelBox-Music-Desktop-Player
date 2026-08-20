@@ -135,6 +135,72 @@ def test_previous_on_empty_queue_is_a_no_op():
     assert state.current is None
 
 
+# ── saut direct depuis la file affichée (jump_to) ─────────────────────────────
+
+def test_jump_to_selects_the_track_at_that_display_index():
+    queue = Queue()
+    queue.load(make_items(5), start_index=0)
+    state = queue.jump_to(3)
+    assert state.current.track_id == 4
+    assert state.current_index == 3
+
+
+def test_jump_to_out_of_range_leaves_the_queue_untouched():
+    queue = Queue()
+    queue.load(make_items(3), start_index=1)
+    for index in (-1, 3, 99):
+        state = queue.jump_to(index)
+        assert state.current.track_id == 2
+
+
+def test_jump_to_on_empty_queue_is_safe():
+    queue = Queue()
+    state = queue.jump_to(0)
+    assert state.current is None
+
+
+def test_jump_to_uses_display_order_even_when_shuffled():
+    # L'utilisateur clique sur une ligne de la file telle qu'AFFICHÉE : c'est
+    # cette piste-là qui doit jouer, quel que soit l'ordre de lecture tiré.
+    queue = Queue()
+    queue.load(make_items(20), start_index=0)
+    queue.set_shuffle(True)
+    state = queue.jump_to(7)
+    assert state.current.track_id == 8
+    assert state.shuffle
+
+
+def test_jump_to_keeps_playing_the_rest_of_the_shuffled_order():
+    # Après un saut en aléatoire, la suite reprend le tirage existant à partir
+    # de la piste choisie — pas de retirage, pas de retour à l'ordre d'origine.
+    queue = Queue()
+    queue.load(make_items(10), start_index=0)
+    queue.set_shuffle(True)
+    order_before = [queue.state().current.track_id]
+    while queue.has_next():
+        order_before.append(queue.next().current.track_id)
+
+    fifth = order_before[4]
+    queue.jump_to(next(i for i, item in enumerate(queue.state().items)
+                       if item.track_id == fifth))
+    replayed = [queue.state().current.track_id]
+    while queue.has_next():
+        replayed.append(queue.next().current.track_id)
+    assert replayed == order_before[4:]
+
+
+def test_jump_to_recovers_from_an_exhausted_queue():
+    # track_ended() en fin de file laisse la position au-delà du dernier
+    # élément ; un clic dans la file doit repartir normalement.
+    queue = Queue()
+    queue.load(make_items(3), start_index=2)
+    queue.track_ended()
+    assert queue.state().current is None
+    state = queue.jump_to(0)
+    assert state.current.track_id == 1
+    assert queue.has_next()
+
+
 # ── fin naturelle d'une piste (track_ended) ───────────────────────────────────
 
 def test_track_ended_advances_like_next():
