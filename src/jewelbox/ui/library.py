@@ -6,8 +6,28 @@ pagination), chaque carte montre la pochette carrée, le titre puis
 l'artiste. Le tri (artiste A→Z ou année récente d'abord) est persisté dans
 la clé GSettings sort-order.
 
+Sur une collection de plusieurs centaines d'albums, faire défiler ne suffit
+plus — trois aides s'ajoutent à la grille, toutes locales (la collection est
+déjà entièrement en mémoire, donc aucune ne redemande le serveur) :
+
+  · un champ de filtrage qui restreint la vue à la frappe, sur le titre et
+    l'artiste, sans tenir compte de la casse ni des accents ;
+  · une barre d'initiales A–Z qui saute au premier artiste d'une lettre ;
+  · une vue « Artistes » : une liste compacte (nom + nombre d'albums) d'où
+    un clic ramène à la grille filtrée sur cet artiste.
+
+Grouper les pochettes en sections DANS la grille a été essayé puis écarté :
+près de la moitié des artistes d'une collection réelle n'ont qu'un album, et
+chaque section finit sa dernière rangée à moitié vide — le défilement double
+au lieu de diminuer. D'où la liste d'artistes séparée, qui tient une ligne
+par artiste.
+
+La barre A–Z suppose un classement par artiste : elle n'est proposée qu'avec
+le tri « Par artiste ».
+
 Code frontière (exclu de la couverture) : les décisions pures — paramètres
-de tri, positions du menu — vivent dans jewelbox.core.library, testé.
+de tri, normalisation, filtrage, initiales, découpe en sections — vivent
+dans jewelbox.core.library, testé.
 """
 
 import asyncio
@@ -27,6 +47,15 @@ class _AlbumItem(GObject.Object):
         self.album = album
 
 
+class _ArtistItem(GObject.Object):
+    """Enveloppe GObject d'une entrée (nom, nombre d'albums)."""
+
+    def __init__(self, name, count):
+        super().__init__()
+        self.name = name
+        self.count = count
+
+
 class LibraryPage(Gtk.Stack):
     """Quatre états : message (sans serveur / erreur / vide), chargement,
     grille. Le rechargement est déclenché par la fenêtre (construction,
@@ -38,7 +67,17 @@ class LibraryPage(Gtk.Stack):
         self._app = application
         self._textures = {}          # url → Gdk.Texture (cache session)
         self._store = Gio.ListStore(item_type=_AlbumItem)
+        self._artist_store = Gio.ListStore(item_type=_ArtistItem)
         self._load_generation = 0
+        # La collection complète telle que reçue du serveur : le filtrage et la
+        # liste d'artistes travaillent dessus, _store ne portant que ce qui est
+        # affiché à l'instant T.
+        self._albums = []
+        self._query = ''
+        # Artiste sélectionné depuis la vue Artistes, ou None (toute la
+        # collection). Indépendant du filtre texte, qui s'y applique en plus.
+        self._artist_filter = None
+        self._search_timeout = None
         # Appelé avec l'id de l'album activé (double-clic / Entrée).
         self.on_album_activated = None
 
@@ -73,6 +112,8 @@ class LibraryPage(Gtk.Stack):
         )
         grid.add_css_class('navigation-sidebar')
         grid.connect('activate', self._on_activate)
+        # Gardé : la barre d'initiales lui demande de défiler (scroll_to).
+        self._grid = grid
 
         scrolled = Gtk.ScrolledWindow(
             child=grid,
@@ -88,17 +129,115 @@ class LibraryPage(Gtk.Stack):
         self._sort_handler = self._sort_dropdown.connect(
             'notify::selected', self._on_sort_changed)
 
-        self._count_label = Gtk.Label(css_classes=['dim-label'], xalign=0,
-                                      hexpand=True)
+        self._count_label = Gtk.Label(css_classes=['dim-label'], xalign=0)
+
+        # Filtre local : la collection entière étant déjà en mémoire, chaque
+        # frappe se contente de recalculer quels albums afficher — aucun appel
+        # serveur, contrairement à l'onglet Recherche qui interroge le serveur
+        # et change de page.
+        self._search = Gtk.SearchEntry(
+            placeholder_text=_('Filtrer par titre ou artiste…'),
+            hexpand=True)
+        self._search.connect('search-changed', self._on_search_changed)
+
+        # Bascule Albums / Artistes. La liste d'artistes n'est qu'une façon
+        # d'atteindre la grille : en choisir un revient à l'onglet Albums
+        # filtré sur lui.
+        self._view_switcher = Adw.ToggleGroup()
+        self._view_switcher.add(Adw.Toggle(name='albums', label=_('Albums')))
+        self._view_switcher.add(Adw.Toggle(name='artists', label=_('Artistes')))
+        self._view_switcher.set_active_name('albums')
+        self._view_switcher.connect(
+            'notify::active-name', self._on_view_changed)
 
         toolbar = Gtk.Box(spacing=12, margin_start=12, margin_end=12,
                           margin_top=6, margin_bottom=6)
-        toolbar.append(self._count_label)
+        toolbar.append(self._view_switcher)
+        toolbar.append(self._search)
         toolbar.append(self._sort_dropdown)
+
+        # Bandeau de l'artiste sélectionné : sans lui, une grille filtrée sur
+        # un artiste serait indiscernable d'une collection qui aurait rétréci.
+        self._artist_banner = Adw.Bin(visible=False)
+        self._artist_banner_label = Gtk.Label(
+            xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
+            css_classes=['heading'])
+        clear_artist = Gtk.Button(
+            icon_name='window-close-symbolic', css_classes=['flat', 'circular'],
+            valign=Gtk.Align.CENTER, tooltip_text=_('Voir tous les artistes'))
+        clear_artist.connect('clicked', lambda *_a: self._select_artist(None))
+        banner_box = Gtk.Box(spacing=8, margin_start=12, margin_end=12,
+                             margin_bottom=6)
+        banner_box.append(self._artist_banner_label)
+        banner_box.append(clear_artist)
+        self._artist_banner.set_child(banner_box)
+
+        # Barre d'initiales : seulement pertinente sur un classement par
+        # artiste (voir _refresh_initials).
+        #
+        # 27 boutons alignés demandent plus de largeur que le plancher de la
+        # fenêtre (420px) : sans précaution, la barre imposerait à elle seule
+        # une largeur minimale de près de 1000px et empêcherait de rétrécir la
+        # fenêtre. Elle est donc posée dans un ScrolledWindow qui ne défile
+        # qu'à l'horizontale et ne réclame rien : sur une fenêtre étroite, on
+        # fait glisser les lettres ; sur une large, elles tiennent toutes et
+        # restent centrées.
+        letters = Gtk.Box(spacing=0, halign=Gtk.Align.CENTER)
+        self._initials_bar = Gtk.ScrolledWindow(
+            child=letters,
+            hscrollbar_policy=Gtk.PolicyType.EXTERNAL,
+            vscrollbar_policy=Gtk.PolicyType.NEVER,
+            propagate_natural_height=True,
+            margin_start=12, margin_end=12, margin_bottom=6)
+        self._initial_buttons = {}
+        for initial in core.INITIALS:
+            button = Gtk.Button(
+                label=initial, css_classes=['flat', 'jewelbox-initial'],
+                tooltip_text=_('Aller aux artistes en « {letter} »').format(
+                    letter=initial))
+            button.connect('clicked', self._on_initial_clicked, initial)
+            self._initial_buttons[initial] = button
+            letters.append(button)
+
+        # « Aucun résultat » pour un filtre trop restrictif : distinct de
+        # l'état « bibliothèque vide », qui parle du serveur et non du filtre.
+        self._empty_filter = Adw.StatusPage(
+            icon_name='system-search-symbolic',
+            title=_('Aucun résultat'),
+            vexpand=True)
+
+        self._grid_stack = Gtk.Stack(
+            transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
+        self._grid_stack.add_named(scrolled, 'results')
+        self._grid_stack.add_named(self._empty_filter, 'empty')
+
+        # ── Vue « Artistes » ─────────────────────────────────────────────────
+        artist_factory = Gtk.SignalListItemFactory()
+        artist_factory.connect('setup', self._on_artist_setup)
+        artist_factory.connect('bind', self._on_artist_bind)
+        artist_list = Gtk.ListView(
+            model=Gtk.NoSelection(model=self._artist_store),
+            factory=artist_factory, single_click_activate=True)
+        artist_list.add_css_class('navigation-sidebar')
+        artist_list.connect('activate', self._on_artist_activated)
+        self._artist_scrolled = Gtk.ScrolledWindow(
+            child=artist_list, hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vexpand=True)
+
+        self._views = Gtk.Stack(
+            transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
+        self._views.add_named(self._grid_stack, 'albums')
+        self._views.add_named(self._artist_scrolled, 'artists')
+
+        count_row = Gtk.Box(margin_start=12, margin_end=12, margin_bottom=6)
+        count_row.append(self._count_label)
 
         grid_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         grid_page.append(toolbar)
-        grid_page.append(scrolled)
+        grid_page.append(self._artist_banner)
+        grid_page.append(self._initials_bar)
+        grid_page.append(count_row)
+        grid_page.append(self._views)
         self.add_named(grid_page, 'grid')
         # Pas de reload() ici : la fenêtre le déclenche via
         # _refresh_server_hint() une fois toute l'UI construite.
@@ -140,11 +279,9 @@ class LibraryPage(Gtk.Stack):
         if generation != self._load_generation:
             return
 
-        self._store.remove_all()
-        for album in page.data:
-            self._store.append(_AlbumItem(album))
-
         if not page.data:
+            self._albums = []
+            self._store.remove_all()
             self._show_status(
                 icon='media-optical-symbolic',
                 title=_('Bibliothèque vide'),
@@ -154,10 +291,13 @@ class LibraryPage(Gtk.Stack):
                 button_action=None)
             return
 
-        total = page.pagination.total or len(page.data)
-        self._count_label.set_label(
-            _('{count} albums').format(count=total) if total > 1
-            else _('1 album'))
+        self._albums = list(page.data)
+        # Un rechargement (changement de tri, retour des Préférences) repart
+        # de la collection entière : l'artiste retenu a pu disparaître, et le
+        # tri par année rendrait de toute façon la barre A–Z sans objet.
+        self._artist_filter = None
+        self._populate_artists()
+        self._apply_filter()
         self.set_visible_child_name('grid')
 
     def _show_status(self, icon, title, description, button_label,
@@ -205,6 +345,164 @@ class LibraryPage(Gtk.Stack):
             self.activate_action(self._status_action, None)
         else:
             self.reload()
+
+    # ── Filtrage local ───────────────────────────────────────────────────────
+
+    def _visible_albums(self):
+        """Les albums retenus par l'artiste sélectionné puis par le filtre
+        texte. Les deux se cumulent : choisir un artiste puis taper affine
+        à l'intérieur de sa discographie."""
+        albums = self._albums
+        if self._artist_filter is not None:
+            albums = core.albums_by_artist(albums, self._artist_filter)
+        return core.filter_albums(albums, self._query)
+
+    def _apply_filter(self):
+        """Reconstruit la grille à partir de la collection en mémoire."""
+        visible = self._visible_albums()
+        self._store.remove_all()
+        for album in visible:
+            self._store.append(_AlbumItem(album))
+        self._update_count(len(visible))
+        self._refresh_initials(visible)
+        self._grid_stack.set_visible_child_name(
+            'results' if visible else 'empty')
+        if not visible:
+            self._empty_filter.set_description(
+                _('Aucun album ne correspond à « {query} ».').format(
+                    query=GLib.markup_escape_text(self._query)))
+
+    def _update_count(self, shown):
+        total = len(self._albums)
+        # Tant que rien n'est filtré, le compte reste celui de la collection —
+        # afficher « 645 sur 645 » serait du bruit.
+        if shown == total:
+            label = (_('{count} albums').format(count=total) if total > 1
+                     else _('1 album'))
+        else:
+            label = _('{shown} sur {total} albums').format(
+                shown=shown, total=total)
+        self._count_label.set_label(label)
+
+    def _on_search_changed(self, entry):
+        # Anti-rebond : filtrer 645 albums prend quelques millisecondes, et
+        # reconstruire le ListStore bien plus — inutile de le refaire à chaque
+        # caractère d'une frappe rapide. Gtk.SearchEntry émet déjà « search-
+        # changed » avec un léger délai, ce timeout ne fait que l'allonger.
+        if self._search_timeout is not None:
+            GLib.source_remove(self._search_timeout)
+        self._search_timeout = GLib.timeout_add(
+            120, self._commit_search, entry.get_text())
+
+    def _commit_search(self, text):
+        self._search_timeout = None
+        self._query = text
+        if self._current_view() == 'artists':
+            self._populate_artists()
+        else:
+            self._apply_filter()
+        return False  # one-shot
+
+    # ── Barre d'initiales ────────────────────────────────────────────────────
+
+    def _refresh_initials(self, visible):
+        """Active les lettres présentes, désactive les autres.
+
+        La barre entière disparaît hors du tri par artiste : sur un classement
+        par année, sauter à « M » atterrirait n'importe où. Elle disparaît
+        aussi quand un artiste est déjà sélectionné — il n'y a plus qu'une
+        initiale à atteindre.
+        """
+        relevant = (self._settings_sort() == 'artist'
+                    and self._artist_filter is None)
+        self._initials_bar.set_visible(relevant)
+        if not relevant:
+            return
+        available = core.available_initials(visible)
+        for initial, button in self._initial_buttons.items():
+            # Désactivées plutôt que masquées : la rangée garde une largeur
+            # stable quand le filtre change, sans sauter sous le curseur.
+            button.set_sensitive(initial in available)
+
+    def _on_initial_clicked(self, _button, initial):
+        index = core.first_index_for_initial(self._visible_albums(), initial)
+        if index is None:
+            return
+        # scroll_to sur la GridView amène l'album en haut de la zone visible.
+        self._grid.scroll_to(index, Gtk.ListScrollFlags.NONE, None)
+
+    # ── Vue « Artistes » ─────────────────────────────────────────────────────
+
+    def _current_view(self):
+        return self._view_switcher.get_active_name() or 'albums'
+
+    def _on_view_changed(self, *_args):
+        view = self._current_view()
+        self._views.set_visible_child_name(view)
+        if view == 'artists':
+            self._populate_artists()
+        else:
+            self._apply_filter()
+        # La barre A–Z appartient à la grille ; la liste d'artistes est déjà
+        # alphabétique et bien plus courte.
+        self._initials_bar.set_visible(
+            view == 'albums' and self._settings_sort() == 'artist'
+            and self._artist_filter is None)
+
+    def _populate_artists(self):
+        entries = core.filter_artist_entries(
+            core.artist_entries(self._albums), self._query)
+        self._artist_store.remove_all()
+        for name, count in entries:
+            self._artist_store.append(_ArtistItem(name, count))
+        if self._current_view() == 'artists':
+            self._count_label.set_label(
+                _('{count} artistes').format(count=len(entries))
+                if len(entries) != 1 else _('1 artiste'))
+
+    def _on_artist_setup(self, _factory, list_item):
+        name = Gtk.Label(xalign=0, hexpand=True,
+                         ellipsize=Pango.EllipsizeMode.END)
+        count = Gtk.Label(css_classes=['dim-label', 'numeric'])
+        arrow = Gtk.Image(icon_name='go-next-symbolic',
+                          css_classes=['dim-label'])
+        row = Gtk.Box(spacing=12, margin_top=8, margin_bottom=8,
+                      margin_start=12, margin_end=12)
+        row.append(name)
+        row.append(count)
+        row.append(arrow)
+        list_item.set_child(row)
+        list_item.name_label, list_item.count_label = name, count
+
+    def _on_artist_bind(self, _factory, list_item):
+        item = list_item.get_item()
+        list_item.name_label.set_label(item.name or _('Artiste inconnu'))
+        list_item.name_label.set_tooltip_text(item.name)
+        list_item.count_label.set_label(
+            _('{count} albums').format(count=item.count) if item.count > 1
+            else _('1 album'))
+
+    def _on_artist_activated(self, _list, position):
+        item = self._artist_store.get_item(position)
+        if item is not None:
+            self._select_artist(item.name)
+
+    def _select_artist(self, name):
+        """Bascule sur la grille filtrée sur cet artiste (None = tout).
+
+        Le filtre texte est effacé au passage : il servait à trouver l'artiste
+        dans la liste, le garder masquerait une partie de sa discographie.
+        """
+        self._artist_filter = name
+        self._query = ''
+        if self._search.get_text():
+            self._search.set_text('')   # réémet search-changed, sans effet ici
+        self._artist_banner.set_visible(name is not None)
+        if name is not None:
+            self._artist_banner_label.set_label(name or _('Artiste inconnu'))
+        self._view_switcher.set_active_name(
+            'albums' if name is not None else 'artists')
+        self._apply_filter()
 
     # ── Tri ──────────────────────────────────────────────────────────────────
 

@@ -90,3 +90,15 @@
   min-width: 64px;
   min-height: 64px;
 }
+
+/* Barre d'initiales de la bibliothèque : 27 boutons sur une rangée, donc
+   chacun doit rester étroit. Le padding par défaut d'un bouton GTK les
+   ferait déborder d'une fenêtre modeste. Les lettres sans album gardent leur
+   place (désactivées, pas masquées) pour que la rangée ne saute pas sous le
+   curseur quand le filtre change. */
+.jewelbox-initial {
+  padding: 2px 4px;
+  min-width: 20px;
+  min-height: 20px;
+  font-size: 0.85em;
+}
