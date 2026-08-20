@@ -150,6 +150,20 @@ class Queue:
             self._position = len(self._order) - 1
         return self.state()
 
+    def jump_to(self, index: int) -> QueueState:
+        """Saute à la piste d'indice `index` dans l'ordre d'AFFICHAGE (_items),
+        celui que la file d'attente montre à l'utilisateur.
+
+        C'est ce que fait un clic sur une ligne de la file : on désigne une
+        piste vue à l'écran, pas une position dans l'ordre de lecture. En
+        mode aléatoire l'ordre tiré est conservé tel quel — on se contente de
+        déplacer la position dessus, donc la suite s'enchaîne sur le reste du
+        tirage (comme Media3 sur un seekToDefaultPosition)."""
+        if not self._items or not (0 <= index < len(self._items)):
+            return self.state()
+        self._position = self._order.index(index)
+        return self.state()
+
     def peek_next(self) -> QueueItem | None:
         """La piste qui suivrait sur une fin naturelle, SANS avancer la file.
 

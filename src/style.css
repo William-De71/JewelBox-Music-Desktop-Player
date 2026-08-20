@@ -81,9 +81,32 @@
 
 /* Grand lecteur : grande pochette à coins arrondis (16px, parité avec le
    RoundedCornerShape(16.dp) du NowPlayingScreen mobile) et bouton lecture
-   central plus imposant que celui du mini-lecteur. */
-.jewelbox-full-player .jewelbox-cover {
+   central plus imposant que celui du mini-lecteur.
+
+   La pochette est un bouton (elle ouvre l'album d'où vient la lecture) : elle
+   porte donc à la fois .jewelbox-cover-button, qui la dépouille de tout ce
+   qui fait un bouton, et .jewelbox-cover pour l'arrondi — d'où le sélecteur
+   plus spécifique ci-dessous, sans quoi le border-radius: 6px du bouton
+   l'emporterait sur les 16px voulus ici. */
+.jewelbox-full-player .jewelbox-cover,
+.jewelbox-full-player .jewelbox-cover-button.jewelbox-cover {
   border-radius: 16px;
+}
+
+/* Survol/appui de la pochette cliquable du grand lecteur : rien d'aussi
+   marqué qu'un fond de bouton, juste un léger assombrissement pour confirmer
+   qu'il se passe quelque chose au clic. Désensibilisée (origine de la file
+   inconnue, ex. instantané d'une version antérieure), elle reste pleinement
+   opaque : c'est la pochette de la piste, pas une commande grisée. */
+.jewelbox-full-player .jewelbox-cover-button:hover {
+  filter: brightness(1.08);
+}
+.jewelbox-full-player .jewelbox-cover-button:active {
+  filter: brightness(0.94);
+}
+.jewelbox-full-player .jewelbox-cover-button:disabled {
+  filter: none;
+  opacity: 1;
 }
 .jewelbox-full-play {
   -gtk-icon-size: 28px;

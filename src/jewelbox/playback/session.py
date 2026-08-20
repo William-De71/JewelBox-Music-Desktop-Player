@@ -39,6 +39,15 @@ class PlaybackUiState:
     # Nom de la source d'où vient la file (playlist utilisateur ou liste
     # intelligente) ; None pour un album ou une piste seule.
     source_name: str | None = None
+    # La file telle qu'affichée (ordre d'origine) et la position de la piste
+    # courante dedans : de quoi dessiner la file d'attente du grand lecteur
+    # sans que l'UI ait à connaître l'objet Queue.
+    queue_items: tuple[QueueItem, ...] = ()
+    queue_index: int | None = None
+    # D'où vient la file : ('album', 12) / ('playlist', 3) / ('smart', 'clé'),
+    # pour proposer d'y retourner depuis le lecteur.
+    source_type: str | None = None
+    source_id: str | None = None
     is_favorite: bool = False
     has_next: bool = False
     has_previous: bool = False
@@ -255,6 +264,21 @@ class PlaybackSession:
             return
         state = self._queue.previous()
         self._load_from_state(state)
+
+    def jump_to(self, index: int):
+        """Lance la piste d'indice `index` dans la file telle qu'affichée —
+        un clic sur une ligne de la file d'attente. Sur la piste déjà en
+        cours, bascule lecture/pause plutôt que de la relancer depuis le
+        début (même geste que la fiche album)."""
+        state = self._queue.state()
+        # Hors borne : ne rien faire du tout. Passer l'état inchangé à
+        # _load_from_state relancerait la piste en cours depuis le début.
+        if not (0 <= index < len(state.items)):
+            return
+        if index == state.current_index:
+            self.toggle_play_pause()
+            return
+        self._load_from_state(self._queue.jump_to(index))
 
     def seek(self, position_seconds: float):
         self._player.seek(position_seconds)
@@ -548,6 +572,10 @@ class PlaybackSession:
             album=current.album_title if current else None,
             cover_url=current.cover_url if current else None,
             source_name=self._source_name if state.has_item else None,
+            queue_items=state.items,
+            queue_index=state.current_index,
+            source_type=self._source_type if state.has_item else None,
+            source_id=self._source_id if state.has_item else None,
             is_favorite=current.is_favorite if current else False,
             has_next=self._queue.has_next(),
             has_previous=self._queue.has_previous(),

@@ -8,6 +8,13 @@ avec ses deux temps et enfin la rangée de contrôles (aléatoire · précédent
 lecture · suivant · répétition). Ouvert en cliquant sur le mini-lecteur ;
 empilé par-dessus les onglets dans le NavigationView.
 
+Sous les contrôles, la file d'attente : la liste des pistes en file avec la
+piste courante mise en avant, dépliable et repliable. Elle évite d'avoir à
+retrouver l'album dans la bibliothèque pour savoir ce qui suit — un clic sur
+une ligne saute directement à cette piste. La pochette, elle, est cliquable :
+elle ramène à la fiche d'où vient la lecture (album, playlist ou liste
+intelligente).
+
 Code frontière (exclu de la couverture) : comme le mini-lecteur, cette page
 ne fait qu'afficher un PlaybackUiState et déléguer chaque action à
 PlaybackSession, déjà testée séparément. Elle partage la même mécanique de
@@ -36,16 +43,36 @@ class FullPlayerPage(Gtk.Box):
         self._seeking = False   # vrai pendant un glisser manuel du curseur
         self._release_id = None
         self._cover_url = None
+        # Signature de la file actuellement dessinée (ids des pistes) : la file
+        # ne se redessine que si elle a vraiment changé, pas à chaque tick de
+        # position (_on_state arrive plusieurs fois par seconde).
+        self._queue_signature = None
+        self._queue_rows = []          # une Gtk.ListBoxRow par piste, dans l'ordre
+        self._queue_index = None
+        # Dernier état reçu : le bouton « Aller à… » y relit la source au clic
+        # plutôt que de dupliquer source_type/source_id en attributs.
+        self._last_state = None
         # Appelé quand la file se vide (plus rien ne joue) : la fenêtre dépile
         # le grand lecteur, sinon il resterait figé sur la dernière piste.
         self.on_closed = None
+        # Appelés par le bouton « Aller à l'album / la playlist » : la fenêtre
+        # empile la fiche correspondante (voir window.py).
+        self.on_open_album = None
+        self.on_open_playlist = None
+        self.on_open_smart_playlist = None
 
         content = self._build_content()
-        # Centré et plafonné : sur une fenêtre large, la pochette et les
-        # contrôles restent groupés au milieu (colonne d'au plus 400px) plutôt
-        # que de s'étirer sur toute la largeur — parité avec la colonne à
-        # marges du grand lecteur mobile. Adw.Clamp gère le centrage horizontal.
-        content.set_valign(Gtk.Align.CENTER)
+        # Plafonné et centré horizontalement : sur une fenêtre large, la
+        # pochette et les contrôles restent groupés au milieu (colonne d'au
+        # plus 560px) plutôt que de s'étirer sur toute la largeur — parité avec
+        # la colonne à marges du grand lecteur mobile. Adw.Clamp s'en charge.
+        #
+        # Verticalement, en revanche, le contenu est aligné en HAUT : depuis
+        # que la file d'attente se déplie sous les contrôles, un centrage ferait
+        # remonter puis redescendre tout le lecteur à chaque bascule. Aligné en
+        # haut, la pochette et les contrôles ne bougent plus, la file pousse
+        # simplement la page vers le bas et le défilement prend le relais.
+        content.set_valign(Gtk.Align.START)
         content.set_vexpand(True)
         clamp = Adw.Clamp(
             child=content, maximum_size=560, tightening_threshold=480,
@@ -72,6 +99,7 @@ class FullPlayerPage(Gtk.Box):
         box.append(self._build_seek())
         box.append(Gtk.Box(height_request=12))
         box.append(self._build_controls())
+        box.append(self._build_queue())
         return box
 
     # ── Grande pochette ──────────────────────────────────────────────────────
@@ -101,13 +129,26 @@ class FullPlayerPage(Gtk.Box):
             css_classes=['dim-label'],
             halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
 
-        overlay = Gtk.Overlay(css_classes=['jewelbox-cover'], hexpand=True)
+        overlay = Gtk.Overlay(hexpand=True)
         overlay.set_child(aspect)
         overlay.add_overlay(self._cover_placeholder)
 
+        # La pochette EST le lien vers l'album (ou la playlist) d'où vient la
+        # lecture : c'est la cible la plus évidente, et elle évite un bouton
+        # texte de plus sous les contrôles. Même motif que la ligne « Derniers
+        # ajouts » de l'accueil — un Gtk.Button dépouillé par
+        # .jewelbox-cover-button, dont la pochette est l'unique enfant.
+        #
+        # .jewelbox-cover passe ici (du parent Overlay au bouton) pour que
+        # l'arrondi et le rognage suivent la surface réellement cliquée.
+        self._cover_button = Gtk.Button(
+            child=overlay, hexpand=True, can_shrink=True,
+            css_classes=['flat', 'jewelbox-cover-button', 'jewelbox-cover'])
+        self._cover_button.connect('clicked', self._on_open_source)
+
         return Adw.Clamp(
-            child=overlay, maximum_size=440, tightening_threshold=440,
-            halign=Gtk.Align.CENTER)
+            child=self._cover_button, maximum_size=440,
+            tightening_threshold=440, halign=Gtk.Align.CENTER)
 
     # ── Titre · artiste · album (titre + cœur sur la même ligne) ─────────────
 
@@ -224,6 +265,179 @@ class FullPlayerPage(Gtk.Box):
         controls.append(self._repeat_button)
         return controls
 
+    # ── File d'attente + retour à la source ──────────────────────────────────
+
+    def _build_queue(self):
+        """La file en cours, dépliable sous les contrôles.
+
+        Repliée par défaut : le lecteur garde son allure « pochette + contrôles »
+        habituelle, et la file ne s'ouvre que si on la demande. Le bouton
+        d'en-tête porte le nombre de pistes, pour savoir ce qu'on va ouvrir
+        avant de cliquer.
+        """
+        self._queue_toggle = Gtk.ToggleButton(css_classes=['flat'])
+        self._queue_toggle_label = Gtk.Label()
+        self._queue_toggle_arrow = Gtk.Image(icon_name='pan-down-symbolic')
+        toggle_box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
+        toggle_box.append(self._queue_toggle_label)
+        toggle_box.append(self._queue_toggle_arrow)
+        self._queue_toggle.set_child(toggle_box)
+        self._queue_toggle.connect('toggled', self._on_queue_toggled)
+
+        self._queue_box = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.NONE,
+            css_classes=['boxed-list'], margin_top=8)
+        self._queue_box.connect('row-activated', self._on_queue_row_activated)
+
+        self._queue_revealer = Gtk.Revealer(
+            child=self._queue_box,
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+
+        self._queue_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0,
+            margin_top=16, visible=False)
+        self._queue_section.append(self._queue_toggle)
+        self._queue_section.append(self._queue_revealer)
+        return self._queue_section
+
+    def _on_queue_toggled(self, button):
+        expanded = button.get_active()
+        self._queue_revealer.set_reveal_child(expanded)
+        self._queue_toggle_arrow.set_from_icon_name(
+            'pan-up-symbolic' if expanded else 'pan-down-symbolic')
+        if expanded:
+            # Ouvrir la file doit montrer où on en est : on amène la piste
+            # courante à l'écran une fois le dépliage terminé (le Revealer
+            # anime, la ligne n'a pas encore sa position finale avant).
+            GLib.timeout_add(250, self._scroll_to_current)
+
+    def _scroll_to_current(self):
+        row = (self._queue_rows[self._queue_index]
+               if self._queue_index is not None
+               and 0 <= self._queue_index < len(self._queue_rows) else None)
+        # grab_focus() sur une ligne d'une liste défilante demande au
+        # ScrolledWindow ancêtre de la rendre visible — plus simple et plus sûr
+        # que de calculer nous-mêmes une position d'ajustement.
+        if row is not None and self._queue_revealer.get_reveal_child():
+            row.grab_focus()
+        return False  # one-shot
+
+    def _build_queue_rows(self, items):
+        while (row := self._queue_box.get_row_at_index(0)) is not None:
+            self._queue_box.remove(row)
+        self._queue_rows = []
+        for index, item in enumerate(items):
+            self._queue_box.append(self._build_queue_row(index, item))
+
+    def _build_queue_row(self, index, item):
+        # Numéro de position dans la file (et non numéro de piste de l'album) :
+        # en mode aléatoire comme sur une playlist, c'est l'ordre affiché qui
+        # fait sens. Il laisse place à l'indicateur « ▸ » sur la piste courante.
+        position_label = Gtk.Label(
+            label=str(index + 1), width_chars=3, xalign=1.0,
+            css_classes=['numeric', 'dim-label'])
+        playing_icon = Gtk.Image(
+            icon_name='media-playback-start-symbolic', visible=False,
+            css_classes=['accent'])
+        leading = Gtk.Box(width_request=28, halign=Gtk.Align.END)
+        leading.append(position_label)
+        leading.append(playing_icon)
+
+        title_label = Gtk.Label(
+            label=item.title, xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        # Artiste en légende sous le titre : redondant sur un album (artiste
+        # unique) mais discret, et indispensable sur une playlist où chaque
+        # piste peut venir d'un artiste différent.
+        artist_label = Gtk.Label(
+            label=item.artist_name, xalign=0, css_classes=['caption', 'dim-label'],
+            ellipsize=Pango.EllipsizeMode.END, visible=bool(item.artist_name))
+        text_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, hexpand=True,
+            valign=Gtk.Align.CENTER)
+        text_box.append(title_label)
+        text_box.append(artist_label)
+
+        row_box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6,
+                          margin_start=12, margin_end=12)
+        row_box.append(leading)
+        row_box.append(text_box)
+
+        row = Gtk.ListBoxRow(activatable=True, child=row_box)
+        # L'indice est porté par la row : « row-activated » ne transmet que la
+        # ligne, c'est là qu'on retrouve à quelle piste elle correspond.
+        row._queue_index = index
+        row._position_label = position_label
+        row._playing_icon = playing_icon
+        self._queue_rows.append(row)
+        return row
+
+    def _on_queue_row_activated(self, _listbox, row):
+        playback = self._app.playback
+        if playback is not None:
+            playback.jump_to(row._queue_index)
+
+    def _update_queue_highlight(self, state):
+        for index, row in enumerate(self._queue_rows):
+            is_current = index == state.queue_index
+            # Sur la piste courante, le numéro cède la place à l'indicateur de
+            # lecture (▸ en lecture, ⏸ en pause) — le même vocabulaire visuel
+            # que la fiche album, où la ligne courante passe aussi en accent.
+            row._position_label.set_visible(not is_current)
+            row._playing_icon.set_visible(is_current)
+            if is_current:
+                row._playing_icon.set_from_icon_name(
+                    'media-playback-start-symbolic' if state.is_playing
+                    else 'media-playback-pause-symbolic')
+                row.add_css_class('accent')
+            else:
+                row.remove_css_class('accent')
+
+    def _update_cover_link(self, state):
+        """Règle l'infobulle de la pochette et son activabilité.
+
+        Rien ne signale visuellement qu'elle est cliquable (pas de fond, pas de
+        bordure : c'est une pochette, pas un bouton) — l'infobulle nomme donc
+        explicitement la destination. Quand l'origine est inconnue, le bouton
+        est désensibilisé plutôt que masqué : la pochette doit rester à
+        l'écran, elle est le sujet de la page."""
+        labels = {
+            'album': _('Aller à l’album'),
+            'playlist': _('Aller à la playlist'),
+            'smart': _('Aller à la liste'),
+        }
+        label = labels.get(state.source_type)
+        can_open = label is not None and state.source_id is not None
+        self._cover_button.set_sensitive(can_open)
+        if not can_open:
+            self._cover_button.set_tooltip_text(None)
+            return
+        # Un album n'a pas de source_name (voir play_album) : on retombe sur le
+        # titre de l'album de la piste courante pour nommer la destination.
+        destination = state.source_name or state.album or ''
+        self._cover_button.set_tooltip_text(
+            _('Ouvrir « {name} »').format(name=destination)
+            if destination else label)
+
+    def _on_open_source(self, _button):
+        state = self._last_state
+        if state is None or state.source_id is None:
+            return
+        # album/playlist sont identifiés par un id numérique, les listes
+        # intelligentes par une clé texte — l'instantané garde les deux sous
+        # forme de texte (forme JSON commune), d'où la conversion ici.
+        if state.source_type == 'smart':
+            if self.on_open_smart_playlist is not None:
+                self.on_open_smart_playlist(state.source_id)
+            return
+        try:
+            item_id = int(state.source_id)
+        except (TypeError, ValueError):
+            return
+        if state.source_type == 'album' and self.on_open_album is not None:
+            self.on_open_album(item_id)
+        elif state.source_type == 'playlist' and self.on_open_playlist is not None:
+            self.on_open_playlist(item_id)
+
     # ── Interactions ─────────────────────────────────────────────────────────
 
     def _on_seek_change_value(self, _scale, _scroll_type, value):
@@ -255,12 +469,36 @@ class FullPlayerPage(Gtk.Box):
 
     # ── État ─────────────────────────────────────────────────────────────────
 
+    def _update_queue(self, state):
+        """Reflète la file du state. Reconstruire les lignes coûte cher et
+        _on_state arrive plusieurs fois par seconde (position de lecture) : on
+        ne redessine que si la file elle-même a changé, et on se contente
+        sinon de déplacer la surbrillance."""
+        signature = tuple(item.track_id for item in state.queue_items)
+        if signature != self._queue_signature:
+            self._queue_signature = signature
+            self._build_queue_rows(state.queue_items)
+            # Le compteur n'a de sens qu'avec plus d'une piste ; sous ce seuil
+            # la section entière disparaît (une file d'une seule piste n'a rien
+            # à montrer que le lecteur n'affiche déjà).
+            self._queue_toggle_label.set_label(
+                _('File d’attente ({count})').format(count=len(signature)))
+            self._queue_toggle.set_visible(len(signature) > 1)
+            if len(signature) <= 1 and self._queue_toggle.get_active():
+                self._queue_toggle.set_active(False)
+        self._queue_index = state.queue_index
+        self._update_queue_highlight(state)
+        self._update_cover_link(state)
+        self._queue_section.set_visible(self._queue_toggle.get_visible())
+
     def _on_state(self, state):
         if not state.has_item:
             if self.on_closed is not None:
                 self.on_closed()
             return
 
+        self._last_state = state
+        self._update_queue(state)
         self._title_label.set_label(state.title or '')
         self._artist_label.set_label(state.artist or '')
         self._album_label.set_label(state.album or '')
