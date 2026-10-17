@@ -191,3 +191,40 @@ class Pagination:
 class AlbumsPage:
     data: tuple[Album, ...] = ()
     pagination: Pagination = field(default_factory=Pagination)
+
+
+@dataclass(frozen=True)
+class QueueDevice:
+    """Ligne de GET /api/player/queue/devices : la file qu'un autre appareil
+    a laissée sur le serveur."""
+
+    device_id: str
+    device_label: str | None = None
+    current_index: int = -1
+    updated_at: str | None = None
+    track_count: int = 0
+
+
+@dataclass(frozen=True)
+class DeviceQueue:
+    """GET /api/player/queue/devices/:id (et GET /api/player/queue) : la file
+    d'un appareil, sa piste courante et sa position dans cette piste."""
+
+    device_id: str
+    device_label: str | None = None
+    current_index: int = -1
+    position_sec: float = 0.0
+    updated_at: str | None = None
+    tracks: tuple[QueueTrack, ...] = ()
+
+
+@dataclass(frozen=True)
+class Radio:
+    """GET /api/player/radio : file aléatoire autour d'un album ou d'un
+    artiste (serveur >= 1.16)."""
+
+    seed_type: str
+    seed_name: str
+    artist_name: str = ''
+    genre: str | None = None
+    tracks: tuple[QueueTrack, ...] = ()

@@ -27,6 +27,7 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gio, Gtk, Pango
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
+from jewelbox.ui.track_menu import menu_button, queue_entries
 
 # Le serveur exige q >= 2 caractères ; plus court, on n'appelle pas.
 _MIN_QUERY = 2
@@ -356,13 +357,11 @@ class SearchPage(Gtk.Stack):
         row_box.append(text)
         row_box.append(duration_label)
         if track.has_file:
-            add_button = Gtk.Button(
-                icon_name='list-add-symbolic', valign=Gtk.Align.CENTER,
-                css_classes=['flat'], tooltip_text=_('Ajouter à une playlist'))
-            add_button.connect('clicked', lambda *_a, track_id=track.id:
-                               present_add_to_playlist(self._app, self,
-                                                       track_id=track_id))
-            row_box.append(add_button)
+            row_box.append(menu_button(queue_entries(
+                lambda track=track: self._enqueue(track, play_next=True),
+                lambda track=track: self._enqueue(track, play_next=False),
+                lambda track=track: present_add_to_playlist(
+                    self._app, self, track_id=track.id))))
 
         row = Gtk.ListBoxRow(activatable=track.has_file, child=row_box)
         if not track.has_file:
@@ -373,6 +372,16 @@ class SearchPage(Gtk.Stack):
             # forment la suite), même motif que la fiche album.
             row._track_index = index
         return row
+
+    def _enqueue(self, track, play_next):
+        playback = self._app.playback
+        if playback is None:
+            return
+        playback.enqueue_tracks([track], play_next=play_next)
+        root = self.get_root()
+        if hasattr(root, 'show_toast'):
+            root.show_toast(_('Sera lu juste après') if play_next
+                            else _('Ajouté à la file d’attente'))
 
     def _on_track_activated(self, _listbox, row):
         index = getattr(row, '_track_index', None)

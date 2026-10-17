@@ -11,6 +11,7 @@ from jewelbox.api.models import (
     Album,
     AlbumsPage,
     Artist,
+    DeviceQueue,
     DynamicMixPlayed,
     Home,
     HomeRecentItem,
@@ -18,7 +19,9 @@ from jewelbox.api.models import (
     Pagination,
     Playlist,
     PlaylistSummary,
+    QueueDevice,
     QueueTrack,
+    Radio,
     SearchResults,
     ServerInfo,
     SmartPlaylist,
@@ -278,3 +281,62 @@ def _parse_pagination(data: dict) -> Pagination:
         # Le serveur envoie ce champ-là en camelCase, fidèle au front web.
         total_pages=_int(data, 'totalPages'),
     )
+
+
+def parse_queue_devices(data) -> tuple[QueueDevice, ...]:
+    data = _require_dict(data, 'queue-devices')
+    devices = []
+    for row in _list(data, 'data'):
+        row = _require_dict(row, 'queue-device')
+        devices.append(QueueDevice(
+            device_id=_req_str(row, 'device_id', 'queue-device'),
+            device_label=_opt_str(row, 'device_label'),
+            current_index=_int(row, 'current_index', -1),
+            updated_at=_opt_str(row, 'updated_at'),
+            track_count=_int(row, 'track_count'),
+        ))
+    return tuple(devices)
+
+
+def parse_device_queue(data) -> DeviceQueue:
+    data = _require_dict(data, 'device-queue')
+    position = data.get('position_sec')
+    return DeviceQueue(
+        device_id=_req_str(data, 'device_id', 'device-queue'),
+        device_label=_opt_str(data, 'device_label'),
+        current_index=_int(data, 'current_index', -1),
+        position_sec=(float(position)
+                      if isinstance(position, (int, float))
+                      and not isinstance(position, bool) else 0.0),
+        updated_at=_opt_str(data, 'updated_at'),
+        tracks=tuple(parse_queue_track(t) for t in _list(data, 'tracks')),
+    )
+
+
+def parse_radio(data) -> Radio:
+    data = _require_dict(data, 'radio')
+    seed = _require_dict(data.get('seed'), 'radio-seed')
+    return Radio(
+        seed_type=_req_str(seed, 'type', 'radio-seed'),
+        seed_name=_req_str(seed, 'name', 'radio-seed'),
+        artist_name=_str(seed, 'artist_name'),
+        genre=_opt_str(seed, 'genre'),
+        tracks=tuple(parse_queue_track(t) for t in _list(data, 'tracks')),
+    )
+
+
+def parse_genres(data) -> tuple[str, ...]:
+    """GET /api/albums/genres : liste brute de chaînes ; les entrées vides ou
+    d'un autre type sont écartées, les doublons de casse fusionnés."""
+    if not isinstance(data, list):
+        raise ParseError('genres : liste attendue')
+    seen = set()
+    genres = []
+    for genre in data:
+        if not isinstance(genre, str) or not genre.strip():
+            continue
+        key = genre.strip().casefold()
+        if key not in seen:
+            seen.add(key)
+            genres.append(genre.strip())
+    return tuple(genres)

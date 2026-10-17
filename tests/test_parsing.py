@@ -329,3 +329,80 @@ def test_albums_page_without_pagination():
     assert page.data == ()
     assert page.pagination.page == 1
     assert page.pagination.limit == 24
+
+
+# ── file partagée, radio, genres ──────────────────────────────────────────────
+
+def test_queue_devices():
+    devices = parsing.parse_queue_devices({'data': [
+        {'device_id': 'phone', 'device_label': 'Pixel', 'current_index': 3,
+         'updated_at': '2026-10-17 20:00:00', 'track_count': 12, 'extra': 1},
+        {'device_id': 'web'},
+    ]})
+    assert devices[0].device_id == 'phone'
+    assert devices[0].device_label == 'Pixel'
+    assert devices[0].current_index == 3
+    assert devices[0].track_count == 12
+    assert devices[1].device_label is None
+    assert devices[1].current_index == -1
+
+
+def test_queue_devices_missing_id_raises():
+    with pytest.raises(ParseError):
+        parsing.parse_queue_devices({'data': [{'device_label': 'x'}]})
+
+
+def test_device_queue():
+    queue = parsing.parse_device_queue({
+        'device_id': 'phone', 'device_label': 'Pixel', 'current_index': 1,
+        'position_sec': 42.5, 'updated_at': 't',
+        'tracks': [{'id': 1, 'title': 'A', 'entry_id': 9, 'has_file': True},
+                   {'id': 2, 'title': 'B'}],
+    })
+    assert queue.position_sec == 42.5
+    assert queue.current_index == 1
+    assert [t.id for t in queue.tracks] == [1, 2]
+    assert queue.tracks[0].entry_id == 9
+
+
+def test_device_queue_defaults_and_bad_position():
+    queue = parsing.parse_device_queue({'device_id': 'x', 'position_sec': 'soon'})
+    assert queue.position_sec == 0.0
+    assert queue.current_index == -1
+    assert queue.tracks == ()
+    assert parsing.parse_device_queue(
+        {'device_id': 'x', 'position_sec': True}).position_sec == 0.0
+    assert parsing.parse_device_queue(
+        {'device_id': 'x', 'position_sec': 3}).position_sec == 3.0
+
+
+def test_radio():
+    radio = parsing.parse_radio({
+        'seed': {'type': 'album', 'id': 4, 'name': 'OK Computer',
+                 'artist_name': 'Radiohead', 'genre': 'Rock'},
+        'tracks': [{'id': 1, 'title': 'Airbag', 'has_file': True}],
+    })
+    assert radio.seed_type == 'album'
+    assert radio.seed_name == 'OK Computer'
+    assert radio.artist_name == 'Radiohead'
+    assert radio.genre == 'Rock'
+    assert radio.tracks[0].title == 'Airbag'
+
+
+def test_radio_without_seed_raises():
+    with pytest.raises(ParseError):
+        parsing.parse_radio({'tracks': []})
+
+
+def test_radio_minimal_seed():
+    radio = parsing.parse_radio({'seed': {'type': 'artist', 'name': 'Muse'}})
+    assert radio.genre is None and radio.artist_name == '' and radio.tracks == ()
+
+
+def test_genres_cleans_and_dedupes():
+    assert parsing.parse_genres(['Rock', 'rock ', '', None, 3, 'Jazz']) == ('Rock', 'Jazz')
+
+
+def test_genres_not_a_list_raises():
+    with pytest.raises(ParseError):
+        parsing.parse_genres({'data': []})

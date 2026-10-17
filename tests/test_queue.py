@@ -616,3 +616,118 @@ def test_append_to_empty_queue_starts_at_first_item():
     queue = Queue()
     state = queue.append(make_items(2))
     assert state.current.track_id == 1
+
+
+# ── lire ensuite / réordonner / retirer par position ──────────────────────────
+
+def ids(state):
+    return [i.track_id for i in state.items]
+
+
+def play_order(queue):
+    played = [queue.state().current.track_id]
+    while queue.has_next():
+        played.append(queue.next().current.track_id)
+    return played
+
+
+def test_insert_next_goes_right_after_current():
+    queue = Queue()
+    queue.load(make_items(4), start_index=1)  # piste 2 en cours
+    extra = [QueueItem(track_id=10, title='X', artist_name='', album_title=''),
+             QueueItem(track_id=11, title='Y', artist_name='', album_title='')]
+    state = queue.insert_next(extra)
+    assert ids(state) == [1, 2, 10, 11, 3, 4]
+    assert state.current.track_id == 2
+    assert play_order(queue) == [2, 10, 11, 3, 4]
+
+
+def test_insert_next_in_shuffle_plays_before_the_rest_of_the_draw():
+    queue = Queue()
+    queue.load(make_items(5), start_index=0)
+    queue.set_shuffle(True)
+    queue.next()
+    current = queue.state().current.track_id
+    rest = [queue._items[i].track_id for i in queue._order[queue._position + 1:]]
+    queue.insert_next([QueueItem(track_id=99, title='N', artist_name='', album_title='')])
+    assert play_order(queue) == [current, 99] + rest
+
+
+def test_insert_next_into_empty_queue_starts_it():
+    queue = Queue()
+    state = queue.insert_next(make_items(2))
+    assert ids(state) == [1, 2] and state.current.track_id == 1
+
+
+def test_insert_next_into_exhausted_queue_resumes_on_it():
+    queue = Queue()
+    queue.load(make_items(1))
+    queue.track_ended()
+    state = queue.insert_next([QueueItem(track_id=7, title='Z', artist_name='', album_title='')])
+    assert state.current.track_id == 7
+    assert ids(state) == [1, 7]
+
+
+def test_insert_next_nothing_is_a_no_op():
+    queue = Queue()
+    queue.load(make_items(2))
+    assert ids(queue.insert_next([])) == [1, 2]
+
+
+def test_move_reorders_and_keeps_current():
+    queue = Queue()
+    queue.load(make_items(4), start_index=1)  # piste 2 en cours
+    state = queue.move(3, 0)
+    assert ids(state) == [4, 1, 2, 3]
+    assert state.current.track_id == 2
+    assert play_order(queue) == [2, 3]
+
+
+def test_move_current_track_follows_it():
+    queue = Queue()
+    queue.load(make_items(4), start_index=0)
+    state = queue.move(0, 2)
+    assert ids(state) == [2, 3, 1, 4]
+    assert state.current.track_id == 1
+    assert play_order(queue) == [1, 4]
+
+
+def test_move_in_shuffle_keeps_the_drawn_order():
+    queue = Queue()
+    queue.load(make_items(5), start_index=0)
+    queue.set_shuffle(True)
+    drawn = [queue._items[i].track_id for i in queue._order]
+    position = queue._position
+    queue.move(4, 0)
+    assert [queue._items[i].track_id for i in queue._order] == drawn
+    assert queue._position == position
+
+
+def test_move_out_of_range_or_same_index_is_a_no_op():
+    queue = Queue()
+    queue.load(make_items(3))
+    assert ids(queue.move(0, 5)) == [1, 2, 3]
+    assert ids(queue.move(1, 1)) == [1, 2, 3]
+
+
+def test_move_on_exhausted_queue_keeps_it_exhausted():
+    queue = Queue()
+    queue.load(make_items(2), start_index=1)
+    queue.track_ended()
+    state = queue.move(0, 1)
+    assert ids(state) == [2, 1] and state.current is None
+
+
+def test_remove_at_targets_one_occurrence_of_a_duplicate():
+    queue = Queue()
+    items = make_items(2) + make_items(1)  # 1, 2, 1
+    queue.load(items, start_index=0)
+    state = queue.remove_at(2)
+    assert ids(state) == [1, 2]
+    assert state.current.track_id == 1
+
+
+def test_remove_at_out_of_range_is_a_no_op():
+    queue = Queue()
+    queue.load(make_items(2))
+    assert ids(queue.remove_at(5)) == [1, 2]

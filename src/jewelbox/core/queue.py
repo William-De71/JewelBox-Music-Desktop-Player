@@ -229,6 +229,62 @@ class Queue:
             self._position = len(self._order)
         return self.state()
 
+    def insert_next(self, items) -> QueueState:
+        """« Lire ensuite » : insère des pistes juste après la piste en cours,
+        dans l'ordre d'affichage comme dans l'ordre de lecture (même en mode
+        aléatoire : elles passent avant le reste du tirage). File vide ou
+        épuisée : elles deviennent la file, la première étant courante."""
+        items = list(items)
+        if not items:
+            return self.state()
+        if not self._items:
+            return self.load(items)
+        if self._position >= len(self._order):
+            return self._restart_with(items)
+        current_item_index = self._order[self._position]
+        insert_at = current_item_index + 1
+        count = len(items)
+        self._items[insert_at:insert_at] = items
+        # Décale les indices d'affichage situés après le point d'insertion,
+        # puis glisse les nouveaux juste après la position de lecture.
+        self._order = [i + count if i >= insert_at else i for i in self._order]
+        new_indices = list(range(insert_at, insert_at + count))
+        self._order[self._position + 1:self._position + 1] = new_indices
+        return self.state()
+
+    def _restart_with(self, items) -> QueueState:
+        """File épuisée (lecture arrivée au bout) : les pistes ajoutées
+        « ensuite » sont ajoutées à la fin et la lecture reprend sur la
+        première d'entre elles."""
+        start = len(self._items)
+        self._items.extend(items)
+        self._order.extend(range(start, start + len(items)))
+        self._position = self._order.index(start)
+        return self.state()
+
+    def move(self, from_index: int, to_index: int) -> QueueState:
+        """Déplace une piste dans l'ordre d'AFFICHAGE (réordonner la file).
+        La piste courante reste courante ; hors mode aléatoire, l'ordre de
+        lecture suit l'ordre affiché."""
+        size = len(self._items)
+        if not (0 <= from_index < size and 0 <= to_index < size) \
+                or from_index == to_index:
+            return self.state()
+        current_item = (self._order[self._position]
+                        if self._position < len(self._order) else None)
+        new_display = list(range(size))
+        new_display.insert(to_index, new_display.pop(from_index))
+        # new_display[nouvel indice] = ancien indice → table inverse.
+        old_to_new = {old: new for new, old in enumerate(new_display)}
+        self._items = [self._items[old] for old in new_display]
+        if self._shuffle:
+            self._order = [old_to_new[i] for i in self._order]
+        else:
+            self._order = list(range(size))
+        if current_item is not None:
+            self._position = self._order.index(old_to_new[current_item])
+        return self.state()
+
     def remove(self, track_id: int) -> QueueState:
         """Retire une piste (ex. retrait manuel d'une playlist en cours de
         lecture), même si c'est celle en cours — la position se recale sur la
@@ -242,7 +298,13 @@ class Queue:
                 if item.track_id == track_id)
         except StopIteration:
             return self.state()
+        return self.remove_at(item_index)
 
+    def remove_at(self, item_index: int) -> QueueState:
+        """Retire l'entrée d'indice `item_index` dans l'ordre d'affichage —
+        utile quand une même piste figure deux fois dans la file."""
+        if not 0 <= item_index < len(self._items):
+            return self.state()
         order_position = self._order.index(item_index)
         del self._items[item_index]
         self._order = [i - (i > item_index) for i in self._order

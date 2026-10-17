@@ -14,3 +14,6 @@ src/jewelbox/ui/search.py
 src/jewelbox/ui/add_to_playlist.py
 src/jewelbox/ui/shortcuts.py
 src/jewelbox/playback/notifier.py
+src/jewelbox/ui/track_menu.py
+src/jewelbox/ui/radio.py
+src/jewelbox/ui/resume_dialog.py

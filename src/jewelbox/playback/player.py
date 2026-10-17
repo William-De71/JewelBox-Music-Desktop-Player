@@ -12,6 +12,8 @@ standard "about-to-finish" : quand playbin3 approche la fin du flux
 courant, on lui fournit tout de suite l'URI suivante.
 """
 
+import sys
+
 import gi
 
 gi.require_version('Gst', '1.0')
@@ -49,6 +51,9 @@ class Player:
 
         self._uri: str | None = None
         self._is_playing = False
+        # ReplayGain : 'off', 'track' ou 'album' (voir set_replaygain).
+        self._replaygain = 'off'
+        self._rgvolume = None
         self._poll_source_id: int | None = None
 
         self.on_position = None
@@ -64,9 +69,54 @@ class Player:
         """Charge une nouvelle URI, en remplaçant la lecture en cours."""
         self._uri = uri
         self._playbin.set_state(Gst.State.NULL)
+        # Seul moment où le filtre audio peut changer : ReplayGain activé ou
+        # coupé depuis le dernier chargement.
+        self._apply_audio_filter()
         self._playbin.set_property('uri', uri)
         self._playbin.set_state(
             Gst.State.PLAYING if play else Gst.State.PAUSED)
+
+    def set_replaygain(self, mode: str):
+        """Normalisation du volume d'après les tags ReplayGain des fichiers :
+        'track' (chaque piste au même niveau), 'album' (l'album garde ses
+        nuances internes) ou 'off'.
+
+        Le filtre audio de playbin3 ne se change qu'à l'arrêt : basculer
+        entre track et album s'applique tout de suite (propriété du filtre en
+        place), activer ou désactiver prend effet à la piste suivante.
+        Un fichier sans tags ReplayGain passe tel quel."""
+        if mode not in ('off', 'track', 'album'):
+            mode = 'off'
+        self._replaygain = mode
+        if self._rgvolume is not None and mode != 'off':
+            self._rgvolume.set_property('album-mode', mode == 'album')
+        if self._playbin.get_state(0)[1] == Gst.State.NULL:
+            self._apply_audio_filter()
+
+    def _apply_audio_filter(self):
+        """Pose (ou retire) rgvolume ! rglimiter comme filtre audio ; à
+        n'appeler que playbin à l'arrêt (NULL). rglimiter évite l'écrêtage
+        quand le gain remonte un morceau enregistré bas."""
+        if self._replaygain == 'off':
+            self._playbin.set_property('audio-filter', None)
+            self._rgvolume = None
+            return
+        if self._rgvolume is not None:
+            self._rgvolume.set_property('album-mode', self._replaygain == 'album')
+            return
+        try:
+            bin_ = Gst.parse_bin_from_description(
+                'rgvolume name=rgvolume ! rglimiter', True)
+        except GLib.Error as error:
+            # gst-plugins-good absent : on lit sans normalisation plutôt que
+            # de ne plus rien lire du tout.
+            print(f'jewelbox: ReplayGain indisponible ({error.message})',
+                  file=sys.stderr)
+            self._replaygain = 'off'
+            return
+        self._rgvolume = bin_.get_by_name('rgvolume')
+        self._rgvolume.set_property('album-mode', self._replaygain == 'album')
+        self._playbin.set_property('audio-filter', bin_)
 
     def set_next_uri(self, uri: str | None):
         """À appeler depuis on_about_to_finish : playbin3 enchaîne sans

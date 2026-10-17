@@ -167,3 +167,34 @@ def albums_by_artist(albums, artist_name: str):
     """
     return [album for album in albums
             if (album.artist.name or '') == artist_name]
+
+
+# ── Genres ────────────────────────────────────────────────────────────────────
+
+def genre_entries(albums):
+    """Les genres présents, chacun avec son nombre d'albums, triés par nom.
+
+    Les variantes de casse ou d'accents (« Rock » / « rock ») fusionnent :
+    saisies à la main au fil des années, elles désignent le même genre. Le
+    nom affiché est l'orthographe la plus fréquente, et à égalité celle qui
+    commence par une majuscule. Les albums sans genre sont ignorés.
+    """
+    groups = {}   # forme normalisée → {orthographe: nombre}
+    for album in albums:
+        genre = (album.genre or '').strip()
+        if genre:
+            spellings = groups.setdefault(normalize(genre), {})
+            spellings[genre] = spellings.get(genre, 0) + 1
+    entries = [
+        (max(spellings, key=lambda name: (spellings[name], name[:1].isupper())),
+         sum(spellings.values()))
+        for spellings in groups.values()]
+    return sorted(entries, key=lambda entry: normalize(entry[0]))
+
+
+def albums_by_genre(albums, genre: str):
+    """Les albums d'un genre, dans l'ordre reçu, en ignorant casse et accents
+    (même fusion que genre_entries)."""
+    key = normalize(genre)
+    return [album for album in albums
+            if normalize((album.genre or '').strip()) == key]

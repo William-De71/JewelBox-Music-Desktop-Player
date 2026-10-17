@@ -12,7 +12,7 @@ l'URL seule suffit). « Tester » interroge /api/health sans rien persister.
 import asyncio
 from gettext import gettext as _
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from jewelbox.api.client import ApiError, JewelBoxClient
 from jewelbox.core import server_url
@@ -115,6 +115,33 @@ class PreferencesDialog(Adw.PreferencesDialog):
             ranking.set_selected(sizes.get_n_items() - 1)
         ranking.connect('notify::selected', self._on_ranking_changed)
         group.add(ranking)
+
+        replaygain = Adw.ComboRow(
+            title=_('Normalisation du volume'),
+            subtitle=_('D’après les tags ReplayGain des fichiers (ajoutés '
+                       'par JewelBox Ripper). Par album, chaque disque garde '
+                       'ses nuances.'),
+            model=Gtk.StringList.new([label for _key, label in self._replaygain_choices()]))
+        keys = [key for key, _label in self._replaygain_choices()]
+        current = self._settings.get_string('replaygain')
+        replaygain.set_selected(keys.index(current) if current in keys else 0)
+        replaygain.connect('notify::selected', self._on_replaygain_changed)
+        group.add(replaygain)
+
+    @staticmethod
+    def _replaygain_choices():
+        # Construit à l'appel (et non à l'import) : gettext doit voir la
+        # locale déjà installée.
+        return (('off', _('Désactivée')), ('track', _('Par piste')),
+                ('album', _('Par album')))
+
+    def _on_replaygain_changed(self, row, _pspec):
+        position = row.get_selected()
+        if 0 <= position < len(self._replaygain_choices()):
+            self._settings.set_string('replaygain', self._replaygain_choices()[position][0])
+            app = Gio.Application.get_default()
+            if app is not None and hasattr(app, 'apply_replaygain'):
+                app.apply_replaygain()
 
     def _on_switch_changed(self, row, _pspec, key):
         self._settings.set_boolean(key, row.get_active())

@@ -103,17 +103,31 @@ class JewelBoxClient:
 
     # ── Bibliothèque ─────────────────────────────────────────────────────────
 
-    async def albums(self, page=1, limit=24, sort='artist', order='asc'):
+    async def albums(self, page=1, limit=24, sort='artist', order='asc',
+                     genre: str | None = None):
         """Page d'albums possédés (wanted=false exclut la wishlist).
 
         Tri artist : le serveur ajoute l'année en clé secondaire, donc un seul
-        appel donne l'ordre artiste → date.
+        appel donne l'ordre artiste → date. genre filtre sur un genre exact.
         """
-        data = await self._get('/api/albums', {
+        query = {
             'page': page, 'limit': limit,
             'sort': sort, 'order': order, 'wanted': False,
-        })
+        }
+        if genre:
+            query['genre'] = genre
+        data = await self._get('/api/albums', query)
         return parsing.parse_albums_page(data)
+
+    async def genres(self):
+        return parsing.parse_genres(await self._get('/api/albums/genres'))
+
+    async def radio(self, album_id: int | None = None,
+                    artist_id: int | None = None):
+        """Radio autour d'un album ou d'un artiste (un seul des deux)."""
+        query = ({'album_id': album_id} if album_id is not None
+                 else {'artist_id': artist_id})
+        return parsing.parse_radio(await self._get('/api/player/radio', query))
 
     async def album(self, album_id: int):
         return parsing.parse_album(await self._get(f'/api/albums/{album_id}'))
@@ -242,6 +256,37 @@ class JewelBoxClient:
         """Retrait manuel d'une piste (serveur >= 1.8 ; 404 avant)."""
         data = await self._delete(f'/api/smart-playlists/dynamic_mix/tracks/{track_id}')
         return parsing.parse_dynamic_mix_played(data)
+
+    # ── File partagée entre appareils (X-Device-Id) ──────────────────────────
+
+    async def save_queue(self, track_ids, current_index: int,
+                         position_sec: float, device_label: str) -> None:
+        """Remplace la file de CET appareil sur le serveur."""
+        await self._put('/api/player/queue', {
+            'track_ids': list(track_ids), 'current_index': current_index,
+            'position_sec': position_sec, 'device_label': device_label,
+        })
+
+    async def update_queue_state(self, current_index: int,
+                                 position_sec: float) -> None:
+        """Progression seule (piste courante, position), sans les pistes."""
+        await self._patch('/api/player/queue/state', {
+            'current_index': current_index, 'position_sec': position_sec,
+        })
+
+    async def clear_queue(self) -> None:
+        await self._delete('/api/player/queue')
+
+    async def queue_devices(self):
+        """Les files laissées par les AUTRES appareils."""
+        return parsing.parse_queue_devices(
+            await self._get('/api/player/queue/devices'))
+
+    async def device_queue(self, device_id: str):
+        """La file d'un autre appareil, pour la reprendre ici."""
+        from urllib.parse import quote
+        return parsing.parse_device_queue(await self._get(
+            f'/api/player/queue/devices/{quote(device_id, safe="")}'))
 
     # ── Last.fm (fire-and-forget côté serveur : 204 même sans scrobbling) ────
 

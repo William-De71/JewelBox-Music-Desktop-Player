@@ -37,6 +37,7 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gio, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core import library as core
+from jewelbox.ui.radio import start_radio
 
 
 class _AlbumItem(GObject.Object):
@@ -77,6 +78,11 @@ class LibraryPage(Gtk.Stack):
         # Artiste sélectionné depuis la vue Artistes, ou None (toute la
         # collection). Indépendant du filtre texte, qui s'y applique en plus.
         self._artist_filter = None
+        # Genre retenu dans le menu déroulant, ou None (tous). Se cumule avec
+        # l'artiste et le filtre texte.
+        self._genre_filter = None
+        self._genre_names = [None]   # position du menu → genre (0 = tous)
+        self._updating_genres = False
         self._search_timeout = None
         # Appelé avec l'id de l'album activé (double-clic / Entrée).
         self.on_album_activated = None
@@ -150,10 +156,18 @@ class LibraryPage(Gtk.Stack):
         self._view_switcher.connect(
             'notify::active-name', self._on_view_changed)
 
+        # Genres : construits à partir de la collection chargée (voir
+        # _refresh_genres), avec le nombre d'albums de chacun.
+        self._genre_model = Gtk.StringList.new([_('Tous les genres')])
+        self._genre_dropdown = Gtk.DropDown(
+            model=self._genre_model, tooltip_text=_('Filtrer par genre'))
+        self._genre_dropdown.connect('notify::selected', self._on_genre_changed)
+
         toolbar = Gtk.Box(spacing=12, margin_start=12, margin_end=12,
                           margin_top=6, margin_bottom=6)
         toolbar.append(self._view_switcher)
         toolbar.append(self._search)
+        toolbar.append(self._genre_dropdown)
         toolbar.append(self._sort_dropdown)
 
         # Bandeau de l'artiste sélectionné : sans lui, une grille filtrée sur
@@ -166,9 +180,17 @@ class LibraryPage(Gtk.Stack):
             icon_name='window-close-symbolic', css_classes=['flat', 'circular'],
             valign=Gtk.Align.CENTER, tooltip_text=_('Voir tous les artistes'))
         clear_artist.connect('clicked', lambda *_a: self._select_artist(None))
+        # Radio de l'artiste sélectionné : ses titres et ceux d'artistes du
+        # même genre, dans un ordre aléatoire.
+        artist_radio = Gtk.Button(valign=Gtk.Align.CENTER, css_classes=['flat'],
+                                  tooltip_text=_('Radio de cet artiste'))
+        artist_radio.set_child(Adw.ButtonContent(
+            icon_name='media-playlist-shuffle-symbolic', label=_('Radio')))
+        artist_radio.connect('clicked', self._on_artist_radio)
         banner_box = Gtk.Box(spacing=8, margin_start=12, margin_end=12,
                              margin_bottom=6)
         banner_box.append(self._artist_banner_label)
+        banner_box.append(artist_radio)
         banner_box.append(clear_artist)
         self._artist_banner.set_child(banner_box)
 
@@ -296,6 +318,7 @@ class LibraryPage(Gtk.Stack):
         # de la collection entière : l'artiste retenu a pu disparaître, et le
         # tri par année rendrait de toute façon la barre A–Z sans objet.
         self._artist_filter = None
+        self._refresh_genres()
         self._populate_artists()
         self._apply_filter()
         self.set_visible_child_name('grid')
@@ -352,10 +375,51 @@ class LibraryPage(Gtk.Stack):
         """Les albums retenus par l'artiste sélectionné puis par le filtre
         texte. Les deux se cumulent : choisir un artiste puis taper affine
         à l'intérieur de sa discographie."""
-        albums = self._albums
+        albums = self._genre_albums()
         if self._artist_filter is not None:
             albums = core.albums_by_artist(albums, self._artist_filter)
         return core.filter_albums(albums, self._query)
+
+    def _genre_albums(self):
+        if self._genre_filter is None:
+            return self._albums
+        return core.albums_by_genre(self._albums, self._genre_filter)
+
+    def _refresh_genres(self):
+        """Reconstruit le menu des genres après un chargement, en gardant le
+        genre choisi s'il existe encore."""
+        entries = core.genre_entries(self._albums)
+        self._updating_genres = True
+        self._genre_model.splice(
+            1, self._genre_model.get_n_items() - 1,
+            [_('{genre} ({count})').format(genre=name, count=count)
+             for name, count in entries])
+        self._genre_names = [None] + [name for name, _count in entries]
+        keep = next((i for i, name in enumerate(self._genre_names)
+                     if name is not None and self._genre_filter is not None
+                     and core.normalize(name) == core.normalize(self._genre_filter)),
+                    0)
+        self._genre_filter = self._genre_names[keep]
+        self._genre_dropdown.set_selected(keep)
+        self._genre_dropdown.set_visible(bool(entries))
+        self._updating_genres = False
+
+    def _on_genre_changed(self, dropdown, _pspec):
+        if self._updating_genres:
+            return
+        position = dropdown.get_selected()
+        self._genre_filter = (self._genre_names[position]
+                              if 0 <= position < len(self._genre_names) else None)
+        if self._current_view() == 'artists':
+            self._populate_artists()
+        else:
+            self._apply_filter()
+
+    def _on_artist_radio(self, _button):
+        album = next((a for a in self._albums
+                      if (a.artist.name or '') == self._artist_filter), None)
+        if album is not None:
+            start_radio(self._app, self, artist_id=album.artist.id)
 
     def _apply_filter(self):
         """Reconstruit la grille à partir de la collection en mémoire."""
@@ -373,7 +437,7 @@ class LibraryPage(Gtk.Stack):
                     query=GLib.markup_escape_text(self._query)))
 
     def _update_count(self, shown):
-        total = len(self._albums)
+        total = len(self._genre_albums())
         # Tant que rien n'est filtré, le compte reste celui de la collection —
         # afficher « 645 sur 645 » serait du bruit.
         if shown == total:
@@ -451,7 +515,7 @@ class LibraryPage(Gtk.Stack):
 
     def _populate_artists(self):
         entries = core.filter_artist_entries(
-            core.artist_entries(self._albums), self._query)
+            core.artist_entries(self._genre_albums()), self._query)
         self._artist_store.remove_all()
         for name, count in entries:
             self._artist_store.append(_ArtistItem(name, count))
