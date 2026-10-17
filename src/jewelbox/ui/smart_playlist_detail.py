@@ -287,6 +287,11 @@ class SmartPlaylistDetailPage(Gtk.Stack):
     def _on_remove_mix_track(self, _button, track_id):
         task = self._run_mix(lambda client: client.dynamic_mix_remove(track_id))
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+        # Si le mix est en cours de lecture, la piste quitte aussi la file
+        # tout de suite : retirée, elle ne doit plus être jouée.
+        playback = self._app.playback
+        if playback is not None:
+            playback.remove_source_tracks('smart', self._key, {track_id})
 
     async def _run_mix(self, call):
         """dynamic_mix_refresh renvoie une SmartPlaylist ; dynamic_mix_remove

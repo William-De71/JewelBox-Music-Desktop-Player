@@ -193,6 +193,31 @@ class PlaybackSession:
         elif report_smart_key is not None:
             self._report_play_started('smart', report_smart_key)
 
+    def remove_source_tracks(self, source_type, source_ref, track_ids):
+        """Des pistes viennent d'être retirées de la source de la file
+        (playlist ou liste intelligente) : elles quittent aussi la file, pour
+        qu'une piste retirée à la main ne soit pas jouée quand même. Sans
+        effet si la file en cours vient d'ailleurs.
+
+        Si la piste retirée est celle en cours, on passe à la suivante."""
+        if (source_type != self._source_type
+                or str(source_ref) != self._source_id):
+            return
+        state = self._queue.state()
+        gone = set(track_ids) & {item.track_id for item in state.items}
+        if not state.has_item or not gone:
+            return
+        current_id = state.current.track_id
+        for track_id in gone:
+            state = self._queue.remove(track_id)
+        if current_id in gone:
+            # La piste préchargée pour l'enchaînement gapless n'est plus
+            # forcément la bonne : rechargement direct de la nouvelle courante.
+            self._load_from_state(state)
+            return
+        self._publish(state)
+        self._save_state()
+
     def _set_source(self, source_type, source_ref):
         self._source_type = source_type
         self._source_id = None if source_ref is None else str(source_ref)
