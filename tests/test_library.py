@@ -240,3 +240,44 @@ def test_albums_by_artist_is_exact_not_fuzzy():
 
 def test_albums_by_artist_of_an_unknown_name_is_empty():
     assert library.albums_by_artist([_FakeAlbum('a', 'Opeth')], 'Korn') == []
+
+
+# ── genres ────────────────────────────────────────────────────────────────────
+
+class _GenreAlbum(_FakeAlbum):
+    def __init__(self, title, genre):
+        super().__init__(title, 'X')
+        self.genre = genre
+
+
+GENRED = [
+    _GenreAlbum('A', 'Rock'),
+    _GenreAlbum('B', 'rock '),
+    _GenreAlbum('C', 'Électro'),
+    _GenreAlbum('D', None),
+    _GenreAlbum('E', '  '),
+    _GenreAlbum('F', 'electro'),
+    _GenreAlbum('G', 'Jazz'),
+]
+
+
+def test_genre_entries_merge_case_and_accents_and_sort():
+    assert library.genre_entries(GENRED) == [
+        ('Électro', 2), ('Jazz', 1), ('Rock', 2)]
+
+
+def test_genre_entries_empty():
+    assert library.genre_entries([]) == []
+
+
+def test_albums_by_genre_ignores_case_and_accents():
+    assert [a.title for a in library.albums_by_genre(GENRED, 'electro')] == ['C', 'F']
+    assert [a.title for a in library.albums_by_genre(GENRED, 'ROCK')] == ['A', 'B']
+    assert library.albums_by_genre(GENRED, 'Metal') == []
+
+
+def test_genre_entries_prefer_frequent_then_capitalised_spelling():
+    albums = [_GenreAlbum('A', 'rock'), _GenreAlbum('B', 'Rock'),
+              _GenreAlbum('C', 'jazz'), _GenreAlbum('D', 'jazz'),
+              _GenreAlbum('E', 'Jazz')]
+    assert library.genre_entries(albums) == [('jazz', 3), ('Rock', 2)]

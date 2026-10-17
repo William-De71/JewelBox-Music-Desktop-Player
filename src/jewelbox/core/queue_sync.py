@@ -1,0 +1,86 @@
+"""Synchronisation de la file avec le serveur : quand envoyer quoi.
+
+Logique pure (testée) derrière playback/queue_sync.py, qui ne fait
+qu'exécuter les décisions. Le serveur garde une file par appareil
+(en-tête X-Device-Id) ; c'est ce qui permet de reprendre ailleurs ce qui
+jouait ici. Protocole de la PWA (PlayerContext.jsx) :
+
+- les pistes changent (nouvel album, ajout, retrait…) → PUT complet ;
+- seule la piste courante change → PATCH de l'état ;
+- en lecture, un PATCH de la position toutes les PROGRESS_INTERVAL
+  secondes (assez pour reprendre au bon endroit, sans marteler SQLite) ;
+- passage en pause → PATCH, pour figer la position exacte ;
+- file vidée → DELETE.
+"""
+
+from dataclasses import dataclass
+
+PROGRESS_INTERVAL = 30.0
+
+
+@dataclass(frozen=True)
+class SyncAction:
+    # 'save' (PUT pistes + état), 'state' (PATCH) ou 'clear' (DELETE).
+    kind: str
+    track_ids: tuple[int, ...] = ()
+    current_index: int = -1
+    position_sec: float = 0.0
+
+
+class QueueSyncPlanner:
+
+    def __init__(self):
+        self._track_ids: tuple[int, ...] = ()
+        self._index = -1
+        self._playing = False
+        self._last_push = 0.0
+
+    def update(self, track_ids, current_index, position_sec, playing,
+               now) -> SyncAction | None:
+        """Nouvel état de la file ; rend l'appel à faire, ou None."""
+        track_ids = tuple(track_ids)
+        index = -1 if current_index is None else current_index
+        position = max(0.0, float(position_sec or 0.0))
+        was_playing = self._playing
+        self._playing = bool(playing)
+
+        if not track_ids:
+            had_queue = bool(self._track_ids)
+            self._track_ids, self._index = (), -1
+            return SyncAction('clear') if had_queue else None
+
+        if track_ids != self._track_ids:
+            self._track_ids, self._index = track_ids, index
+            self._last_push = now
+            return SyncAction('save', track_ids, index, position)
+
+        paused_now = was_playing and not self._playing
+        progress_due = (self._playing
+                        and now - self._last_push >= PROGRESS_INTERVAL)
+        if index != self._index or paused_now or progress_due:
+            self._index = index
+            self._last_push = now
+            return SyncAction('state', current_index=index,
+                              position_sec=position)
+        return None
+
+
+def resume_start(playable, current_index):
+    """Où reprendre la file d'un autre appareil, une fois écartées les pistes
+    sans fichier (la lecture ne garde que les jouables).
+
+    playable : un booléen par piste de la file d'origine. Rend
+    (indice parmi les jouables, même_piste), ou None si rien n'est jouable.
+    même_piste dit si la position enregistrée s'applique : faux quand la
+    piste courante d'origine n'est pas jouable ici (on repart alors du début
+    de la suivante) ou quand l'indice est inconnu."""
+    playable = list(playable)
+    total = sum(1 for flag in playable if flag)
+    if total == 0:
+        return None
+    if current_index is None or not 0 <= current_index < len(playable):
+        return 0, False
+    before = sum(1 for flag in playable[:current_index] if flag)
+    if playable[current_index]:
+        return before, True
+    return min(before, total - 1), False

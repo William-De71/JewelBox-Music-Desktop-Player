@@ -27,7 +27,7 @@ class _MemorySettings:
         'server-url': '', 'server-id': '', 'device-id': '',
         'sort-order': 'artist',
         'background-playback': True, 'notify-track-change': True,
-        'smart-ranking-size': 100,
+        'smart-ranking-size': 100, 'replaygain': 'album',
     }
 
     def __init__(self):
@@ -75,6 +75,7 @@ class JewelboxApplication(Adw.Application):
         self.playback = None
         self._mpris = None
         self._notifier = None
+        self._queue_sync = None
         # Fenêtre masquée (lecture en arrière-plan) : minuterie de sortie
         # quand plus rien ne joue, et demande au portail faite une seule fois.
         self._idle_quit_source = 0
@@ -87,6 +88,7 @@ class JewelboxApplication(Adw.Application):
         self._add_action('about', self._on_about)
         self._add_action('shortcuts', self._on_shortcuts,
                          ['<primary>question'])
+        self._add_action('resume-from-device', self._on_resume_from_device)
 
         # Commandes de lecture au clavier : mêmes combinaisons que GNOME
         # Musique (Ctrl+Espace, Ctrl+N / Ctrl+B, Ctrl+S, Ctrl+R) — pas de
@@ -124,6 +126,11 @@ class JewelboxApplication(Adw.Application):
         from jewelbox.playback.notifier import TrackNotifier
         self._notifier = TrackNotifier(self, self.playback)
         self._notifier.start()
+        # File publiée sur le serveur : un autre appareil peut la reprendre.
+        from jewelbox.playback.queue_sync import QueueSync
+        self._queue_sync = QueueSync(self, self.playback)
+        self._queue_sync.start()
+        self.apply_replaygain()
         self.playback.add_listener(self._on_playback_state)
 
     def do_activate(self):
@@ -148,6 +155,8 @@ class JewelboxApplication(Adw.Application):
             self._mpris.stop()
         if self._notifier is not None:
             self._notifier.stop()
+        if self._queue_sync is not None:
+            self._queue_sync.stop()
         self._cancel_idle_quit()
         Adw.Application.do_shutdown(self)
 
@@ -325,6 +334,15 @@ class JewelboxApplication(Adw.Application):
             except ValueError:
                 self._client = None
         return self._client
+
+    def apply_replaygain(self):
+        """Applique le réglage ReplayGain (off / track / album) au moteur."""
+        if self.playback is not None and self.settings is not None:
+            self.playback.set_replaygain(self.settings.get_string('replaygain'))
+
+    def _on_resume_from_device(self, *_args):
+        from jewelbox.ui.resume_dialog import ResumeDialog
+        ResumeDialog(self).present(self.props.active_window)
 
     def smart_ranking_size(self) -> int | None:
         """Taille choisie des classements intelligents (Préférences)."""

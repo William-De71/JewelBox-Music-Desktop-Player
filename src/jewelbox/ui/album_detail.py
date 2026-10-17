@@ -20,6 +20,8 @@ from gi.repository import Adw, GLib, Gtk, Pango
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
+from jewelbox.ui.radio import start_radio
+from jewelbox.ui.track_menu import menu_button, queue_entries
 
 
 class AlbumDetailPage(Gtk.Stack):
@@ -115,15 +117,27 @@ class AlbumDetailPage(Gtk.Stack):
         header.append(self._meta_label)
         header.append(self._notes_label)
 
-        # « Ajouter à une playlist » pour l'album entier (parité avec l'icône
-        # de la barre de l'écran album Android).
-        add_album = Gtk.Button(
-            halign=Gtk.Align.CENTER, margin_top=8, css_classes=['pill'])
-        add_album.set_child(Adw.ButtonContent(
-            icon_name='list-add-symbolic', label=_('Ajouter à une playlist')))
-        add_album.connect('clicked', lambda *_a: present_add_to_playlist(
+        # Actions sur l'album entier : radio autour de lui, et le menu
+        # « Ajouter » (lire ensuite, file d'attente, playlist).
+        radio = Gtk.Button(css_classes=['pill'],
+                           tooltip_text=_('Radio autour de cet album'))
+        radio.set_child(Adw.ButtonContent(
+            icon_name='media-playlist-shuffle-symbolic', label=_('Radio')))
+        radio.connect('clicked', lambda *_a: start_radio(
             self._app, self, album_id=self._album_id))
-        header.append(add_album)
+        add_album = menu_button(
+            queue_entries(
+                lambda: self._enqueue(None, play_next=True),
+                lambda: self._enqueue(None, play_next=False),
+                lambda: present_add_to_playlist(
+                    self._app, self, album_id=self._album_id)),
+            icon_name='list-add-symbolic', label=_('Ajouter'),
+            tooltip=_('Ajouter l’album à la file ou à une playlist'))
+        add_album.add_css_class('pill')
+        actions = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER, margin_top=8)
+        actions.append(radio)
+        actions.append(add_album)
+        header.append(actions)
 
         self._tracks_box = Gtk.ListBox(
             selection_mode=Gtk.SelectionMode.NONE,
@@ -247,12 +261,12 @@ class AlbumDetailPage(Gtk.Stack):
         favorite_button.connect(
             'toggled', self._on_favorite_toggled, client, track.id)
 
-        add_button = Gtk.Button(
-            icon_name='list-add-symbolic', valign=Gtk.Align.CENTER,
-            css_classes=['flat'], tooltip_text=_('Ajouter à une playlist'))
-        add_button.connect('clicked', lambda *_a, track_id=track.id:
-                           present_add_to_playlist(self._app, self,
-                                                   track_id=track_id))
+        add_button = menu_button(queue_entries(
+            lambda track_id=track.id: self._enqueue(track_id, play_next=True),
+            lambda track_id=track.id: self._enqueue(track_id, play_next=False),
+            lambda track_id=track.id: present_add_to_playlist(
+                self._app, self, track_id=track_id)))
+        add_button.set_visible(track.has_file)
 
         row_box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6,
                           margin_start=12, margin_end=12)
@@ -302,6 +316,19 @@ class AlbumDetailPage(Gtk.Stack):
             playback.toggle_play_pause()
         else:
             playback.play_album(album, track_id)
+
+    def _enqueue(self, track_id, play_next):
+        """Lire ensuite / ajouter à la file : une piste, ou l'album entier
+        (track_id None)."""
+        playback = self._app.playback
+        if playback is None or self._album is None:
+            return
+        playback.enqueue_album(self._album, track_id=track_id,
+                               play_next=play_next)
+        root = self.get_root()
+        if hasattr(root, 'show_toast'):
+            root.show_toast(_('Sera lu juste après') if play_next
+                            else _('Ajouté à la file d’attente'))
 
     def _on_favorite_toggled(self, button, client, track_id):
         is_favorite = button.get_active()

@@ -274,6 +274,8 @@ class JewelboxWindow(Adw.ApplicationWindow):
 
     def _build_main_menu(self):
         menu = Gio.Menu()
+        menu.append(_('Reprendre depuis un autre appareil…'),
+                    'app.resume-from-device')
         menu.append(_('Préférences'), 'app.preferences')
         menu.append(_('Raccourcis clavier'), 'app.shortcuts')
         menu.append(_('À propos de JewelBox'), 'app.about')

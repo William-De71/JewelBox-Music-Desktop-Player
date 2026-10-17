@@ -29,6 +29,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
 from jewelbox.ui.shortcuts import with_shortcut
+from jewelbox.ui.track_menu import menu_button
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
 
 
@@ -54,6 +55,7 @@ class FullPlayerPage(Gtk.Box):
         # Dernier état reçu : le bouton « Aller à… » y relit la source au clic
         # plutôt que de dupliquer source_type/source_id en attributs.
         self._last_state = None
+        self._last_queue_items = ()
         # Appelé quand la file se vide (plus rien ne joue) : la fenêtre dépile
         # le grand lecteur, sinon il resterait figé sur la dernière piste.
         self.on_closed = None
@@ -101,8 +103,54 @@ class FullPlayerPage(Gtk.Box):
         box.append(self._build_seek())
         box.append(Gtk.Box(height_request=12))
         box.append(self._build_controls())
+        box.append(self._build_sleep_timer())
         box.append(self._build_queue())
         return box
+
+    # ── Minuterie de sommeil ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _sleep_choices():
+        """(libellé, mode passé à PlaybackSession.set_sleep_timer)."""
+        return ((_('15 minutes'), 15), (_('30 minutes'), 30),
+                (_('45 minutes'), 45), (_('1 heure'), 60), (_('1 h 30'), 90),
+                (_('Fin de la piste en cours'), 'track'))
+
+    def _build_sleep_timer(self):
+        """Bouton « lune » sous les contrôles : arrête la lecture au bout
+        d'un délai ou à la fin de la piste. Son libellé montre le temps
+        restant tant que la minuterie tourne."""
+        entries = [(label, lambda mode=mode: self._set_sleep(mode))
+                   for label, mode in self._sleep_choices()]
+        entries += [None, (_('Désactiver la minuterie'),
+                           lambda: self._set_sleep(None))]
+        self._sleep_button = menu_button(
+            entries, icon_name='weather-clear-night-symbolic',
+            label=_('Minuterie'), tooltip=_('Minuterie de sommeil'))
+        self._sleep_button.set_halign(Gtk.Align.CENTER)
+        self._sleep_button.set_margin_top(8)
+        # Le libellé est le 2e enfant du contenu posé par menu_button.
+        self._sleep_label = self._sleep_button.get_child().get_last_child()
+        return self._sleep_button
+
+    def _set_sleep(self, mode):
+        if self._app.playback is not None:
+            self._app.playback.set_sleep_timer(mode)
+
+    def _update_sleep(self, state):
+        if state.sleep_mode == 'timer':
+            minutes = max(1, -(-int(state.sleep_remaining_seconds) // 60))
+            text = _('Arrêt dans {minutes} min').format(minutes=minutes)
+        elif state.sleep_mode == 'track':
+            text = _('Arrêt en fin de piste')
+        else:
+            text = _('Minuterie')
+        if self._sleep_label.get_label() != text:
+            self._sleep_label.set_label(text)
+        if state.sleep_mode is not None:
+            self._sleep_button.add_css_class('accent')
+        else:
+            self._sleep_button.remove_css_class('accent')
 
     # ── Grande pochette ──────────────────────────────────────────────────────
 
@@ -332,7 +380,16 @@ class FullPlayerPage(Gtk.Box):
             row.grab_focus()
         return False  # one-shot
 
+    def _move(self, from_index, to_index):
+        if self._app.playback is not None:
+            self._app.playback.move_in_queue(from_index, to_index)
+
+    def _remove_from_queue(self, index):
+        if self._app.playback is not None:
+            self._app.playback.remove_from_queue(index)
+
     def _build_queue_rows(self, items):
+        self._last_queue_items = tuple(items)
         while (row := self._queue_box.get_row_at_index(0)) is not None:
             self._queue_box.remove(row)
         self._queue_rows = []
@@ -367,10 +424,24 @@ class FullPlayerPage(Gtk.Box):
         text_box.append(title_label)
         text_box.append(artist_label)
 
+        # Réordonner / retirer : l'indice est celui de l'ordre affiché, les
+        # lignes étant reconstruites à chaque changement de la file.
+        count = len(self._last_queue_items)
+        entries = []
+        if index > 0:
+            entries.append((_('Monter'), lambda: self._move(index, index - 1)))
+        if index < count - 1:
+            entries.append((_('Descendre'),
+                            lambda: self._move(index, index + 1)))
+        entries.append((_('Retirer de la file'),
+                        lambda: self._remove_from_queue(index)))
+        row_menu = menu_button(entries, tooltip=_('Options de la file'))
+
         row_box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6,
-                          margin_start=12, margin_end=12)
+                          margin_start=12, margin_end=6)
         row_box.append(leading)
         row_box.append(text_box)
+        row_box.append(row_menu)
 
         row = Gtk.ListBoxRow(activatable=True, child=row_box)
         # L'indice est porté par la row : « row-activated » ne transmet que la
@@ -516,6 +587,7 @@ class FullPlayerPage(Gtk.Box):
 
         self._last_state = state
         self._update_queue(state)
+        self._update_sleep(state)
         self._title_label.set_label(state.title or '')
         self._artist_label.set_label(state.artist or '')
         self._album_label.set_label(state.album or '')

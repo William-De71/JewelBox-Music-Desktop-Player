@@ -38,6 +38,16 @@
       <summary>Notifier le changement de piste</summary>
       <description>Notification système (titre, artiste, pochette) à chaque nouvelle piste quand la fenêtre n'a pas le focus</description>
     </key>
+    <key name="replaygain" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="track"/>
+        <choice value="album"/>
+      </choices>
+      <default>'album'</default>
+      <summary>Normalisation du volume (ReplayGain)</summary>
+      <description>off : désactivée ; track : chaque piste au même niveau ; album : chaque album au même niveau, nuances internes conservées. Sans effet sur un fichier sans tags ReplayGain.</description>
+    </key>
     <key name="smart-ranking-size" type="i">
       <range min="1" max="1000"/>
       <default>100</default>
