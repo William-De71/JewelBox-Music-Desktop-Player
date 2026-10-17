@@ -60,6 +60,7 @@ class JewelboxApplication(Adw.Application):
         self.device_id = ''
         self._client = None
         self.playback = None
+        self._mpris = None
         GLib.set_application_name('JewelBox Music Player')
 
         self._add_action('quit', lambda *_a: self.quit(), ['<primary>q'])
@@ -88,6 +89,11 @@ class JewelboxApplication(Adw.Application):
         # via get_client) et avant la fenêtre, pour que le mini-lecteur soit
         # déjà correct à l'affichage.
         self.playback.restore()
+        # Lecteur du menu système GNOME, touches multimédia, GSConnect… :
+        # publié après restore() pour annoncer d'emblée la piste reprise.
+        from jewelbox.playback.mpris import MprisService
+        self._mpris = MprisService(self, self.playback)
+        self._mpris.start()
 
     def do_activate(self):
         window = self.props.active_window
@@ -101,6 +107,8 @@ class JewelboxApplication(Adw.Application):
         # capte la position exacte d'une lecture interrompue par la fermeture.
         if self.playback is not None:
             self.playback.save_now()
+        if self._mpris is not None:
+            self._mpris.stop()
         Adw.Application.do_shutdown(self)
 
     def _add_action(self, name, callback, accels=None):
