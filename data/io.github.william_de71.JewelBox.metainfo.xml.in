@@ -39,6 +39,11 @@
     entrée automatiquement, et la CI échoue si les deux divergent.
   -->
   <releases>
+    <release version="0.8.0" date="2026-10-17">
+      <description>
+        <p>Corrections et améliorations diverses.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-08-20">
       <description>
         <p>Corrections et améliorations diverses.</p>
