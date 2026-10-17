@@ -28,6 +28,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.shortcuts import with_shortcut
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
 
 
@@ -169,7 +170,7 @@ class FullPlayerPage(Gtk.Box):
             icon_name='jewelbox-not-favorite-symbolic',
             css_classes=['flat', 'circular'],
             valign=Gtk.Align.CENTER, halign=Gtk.Align.END,
-            tooltip_text=_('Favori'))
+            tooltip_text=with_shortcut(_('Favori'), 'toggle-favorite'))
         self._favorite_button.connect('toggled', self._on_favorite_toggled)
 
         # Pendant du cœur, à gauche : ajouter la piste en cours à une playlist.
@@ -234,7 +235,7 @@ class FullPlayerPage(Gtk.Box):
     def _build_controls(self):
         self._shuffle_button = Gtk.ToggleButton(
             icon_name='media-playlist-shuffle-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Lecture aléatoire'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Lecture aléatoire'), 'toggle-shuffle'))
         # _updating_shuffle protège le set_active programmatique de _on_state :
         # sinon resynchroniser le bouton réémettrait « toggled » et rappellerait
         # toggle_shuffle → _publish → _on_state en boucle (cf. player_bar).
@@ -243,26 +244,26 @@ class FullPlayerPage(Gtk.Box):
 
         self._previous_button = Gtk.Button(
             icon_name='media-skip-backward-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Précédent'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Précédent'), 'previous'))
         self._previous_button.connect(
             'clicked', lambda *_a: self._app.playback.previous())
 
         self._play_pause_button = Gtk.Button(
             icon_name='media-playback-start-symbolic',
             css_classes=['flat', 'circular', 'jewelbox-full-play'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Lecture/Pause'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Lecture/Pause'), 'play-pause'))
         self._play_pause_button.connect(
             'clicked', lambda *_a: self._app.playback.toggle_play_pause())
 
         self._next_button = Gtk.Button(
             icon_name='media-skip-forward-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Suivant'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Suivant'), 'next'))
         self._next_button.connect(
             'clicked', lambda *_a: self._app.playback.next())
 
         self._repeat_button = Gtk.Button(
             icon_name='media-playlist-repeat-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Répétition'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Répétition'), 'cycle-repeat'))
         self._repeat_button.connect(
             'clicked', lambda *_a: self._app.playback.cycle_repeat())
 

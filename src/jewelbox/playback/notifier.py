@@ -23,6 +23,10 @@ NOTIFICATION_ID = 'now-playing'
 # changement de piste) avant de la joindre à la notification.
 _DELAY_MS = 1200
 
+# Côté de l'icône jointe : sous la limite de 512 px du portail, et bien
+# assez pour la vignette d'une bulle de notification.
+_ICON_SIZE = 256
+
 
 class TrackNotifier:
 
@@ -83,12 +87,25 @@ class TrackNotifier:
 
     @staticmethod
     def _cover_icon(cover_url):
-        # BytesIcon plutôt que FileIcon : le portail de notification (Flatpak)
-        # ne peut pas lire un fichier du bac à sable, il veut les octets.
+        """Pochette réduite, en PNG, pour la notification — ou None.
+
+        BytesIcon plutôt que FileIcon : le portail de notification (Flatpak)
+        ne lit pas un fichier du bac à sable, il veut les octets. Et il valide
+        l'icône : au-delà de 512×512 il rejette la notification ENTIÈRE (pas
+        seulement l'icône) — or une pochette d'album dépasse souvent 1000 px.
+        D'où la réduction systématique à _ICON_SIZE."""
         if not cover_url:
             return None
         path: Path = cover_cache_path(cover_url)
-        try:
-            return Gio.BytesIcon.new(GLib.Bytes.new(path.read_bytes()))
-        except OSError:
+        if not path.exists():
             return None
+        try:
+            from gi.repository import GdkPixbuf
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                str(path), _ICON_SIZE, _ICON_SIZE, True)
+            ok, data = pixbuf.save_to_bufferv('png', [], [])
+        except (GLib.Error, ImportError, ValueError):
+            return None
+        if not ok:
+            return None
+        return Gio.BytesIcon.new(GLib.Bytes.new(data))
