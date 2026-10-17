@@ -7,8 +7,8 @@ web de JewelBox (client/src/components/PlayerBar.jsx) — trois zones :
   droite  : favori · volume · fermer
 
 Parité fonctionnelle avec le mini-lecteur Android/web (piloté par
-PlaybackSession) mais sans MPRIS ni notification système ici — ça viendra
-dans une phase dédiée. Masquée tant qu'aucune piste n'a été chargée
+PlaybackSession). Le lecteur du menu système GNOME est fourni à part, par
+playback/mpris.py. Masquée tant qu'aucune piste n'a été chargée
 (has_item == False).
 """
 
