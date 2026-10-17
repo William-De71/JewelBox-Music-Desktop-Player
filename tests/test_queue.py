@@ -548,3 +548,26 @@ def test_from_saved_clamps_an_out_of_range_index():
     restored = Queue.from_saved({'tracks': [{'track_id': 1}, {'track_id': 2}],
                                  'index': 99})
     assert restored.state().current.track_id == 2
+
+
+def test_remove_keeps_shuffled_play_order():
+    # Retirer une piste ne tire pas un nouvel ordre au sort : la suite de la
+    # lecture aléatoire reste celle déjà tirée, moins la piste retirée.
+    queue = Queue()
+    queue.load(make_items(6), start_index=0)
+    queue.set_shuffle(True)
+    queue.next()
+    upcoming = [queue._items[i].track_id
+                for i in queue._order[queue._position:]]
+    state = queue.remove(upcoming[1])
+    played = [state.current.track_id]
+    while queue.has_next():
+        played.append(queue.next().current.track_id)
+    assert played == [upcoming[0]] + upcoming[2:]
+
+def test_remove_track_before_current_keeps_current():
+    queue = Queue()
+    queue.load(make_items(4), start_index=2)  # piste 3 en cours
+    state = queue.remove(1)
+    assert state.current.track_id == 3
+    assert queue.next().current.track_id == 4

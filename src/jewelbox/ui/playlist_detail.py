@@ -370,7 +370,16 @@ class PlaylistDetailPage(Gtk.Stack):
             playlist = await call(client)
         except ApiError:
             return
+        before = ({t.id for t in self._playlist.tracks}
+                  if self._playlist is not None else set())
         self._apply(client, playlist)
+        # Si cette playlist est en cours de lecture, la file suit : une piste
+        # retirée (plus aucune entrée dans la playlist) ne doit plus être jouée.
+        removed = before - {t.id for t in playlist.tracks}
+        playback = self._app.playback
+        if playback is not None and removed:
+            playback.remove_source_tracks(
+                'playlist', self._playlist_id, removed)
 
     # ── Renommer / supprimer ─────────────────────────────────────────────────
 

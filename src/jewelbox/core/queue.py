@@ -210,9 +210,12 @@ class Queue:
         return self.state()
 
     def remove(self, track_id: int) -> QueueState:
-        """Retire une piste (ex. retrait manuel du mix dynamique), même si
-        c'est celle en cours — la position se recale sur la piste qui
-        suivait, comme Media3 le fait en pareil cas."""
+        """Retire une piste (ex. retrait manuel d'une playlist en cours de
+        lecture), même si c'est celle en cours — la position se recale sur la
+        piste qui suivait, comme Media3 le fait en pareil cas.
+
+        L'ordre de lecture est conservé tel quel (pas de nouveau tirage en
+        mode aléatoire) : les pistes déjà jouées ne reviennent pas."""
         try:
             item_index = next(
                 i for i, item in enumerate(self._items)
@@ -220,20 +223,16 @@ class Queue:
         except StopIteration:
             return self.state()
 
-        current_item = (self._items[self._order[self._position]]
-                        if self._position < len(self._order) else None)
+        order_position = self._order.index(item_index)
         del self._items[item_index]
-        self._rebuild_order(keep_current=False)
-        if current_item is not None and current_item.track_id != track_id:
-            # La piste qui jouait existe toujours (ce n'est pas elle qu'on
-            # retire) : elle est forcément encore dans _items après le
-            # rebuild, on retrouve sa nouvelle position.
-            new_item_index = next(
-                i for i, item in enumerate(self._items)
-                if item.track_id == current_item.track_id)
-            self._position = self._order.index(new_item_index)
-        else:
-            self._position = min(item_index, max(0, len(self._order) - 1))
+        self._order = [i - (i > item_index) for i in self._order
+                       if i != item_index]
+        if order_position < self._position:
+            self._position -= 1
+        elif order_position == self._position:
+            # C'était la piste courante : la suivante dans l'ordre de lecture
+            # prend sa place, ou la nouvelle dernière en fin de file.
+            self._position = min(self._position, max(0, len(self._order) - 1))
         return self.state()
 
     # ── Shuffle / repeat ─────────────────────────────────────────────────────
