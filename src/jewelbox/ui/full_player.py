@@ -28,6 +28,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.add_to_playlist import present_add_to_playlist
 
 
 class FullPlayerPage(Gtk.Box):
@@ -171,7 +172,15 @@ class FullPlayerPage(Gtk.Box):
             tooltip_text=_('Favori'))
         self._favorite_button.connect('toggled', self._on_favorite_toggled)
 
+        # Pendant du cœur, à gauche : ajouter la piste en cours à une playlist.
+        self._add_button = Gtk.Button(
+            icon_name='list-add-symbolic', css_classes=['flat', 'circular'],
+            valign=Gtk.Align.CENTER, halign=Gtk.Align.START,
+            tooltip_text=_('Ajouter à une playlist'))
+        self._add_button.connect('clicked', self._on_add_to_playlist)
+
         title_row = Gtk.Overlay(child=self._title_label)
+        title_row.add_overlay(self._add_button)
         title_row.add_overlay(self._favorite_button)
 
         self._artist_label = Gtk.Label(
@@ -460,6 +469,13 @@ class FullPlayerPage(Gtk.Box):
         if self._updating_shuffle:
             return
         self._app.playback.toggle_shuffle()
+
+    def _on_add_to_playlist(self, _button):
+        state = self._last_state
+        if state is None or state.current_track_id is None:
+            return
+        present_add_to_playlist(self._app, self,
+                                track_id=state.current_track_id)
 
     def _on_favorite_toggled(self, _button):
         # set_active programmatique de _on_state protégé par _updating_favorite.

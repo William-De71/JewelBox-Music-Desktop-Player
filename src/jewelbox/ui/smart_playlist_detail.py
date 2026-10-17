@@ -151,7 +151,8 @@ class SmartPlaylistDetailPage(Gtk.Stack):
 
     async def _load(self, client):
         try:
-            smart = await client.smart_playlist(self._key)
+            smart = await client.smart_playlist(
+                self._key, ranking_size=self._app.smart_ranking_size())
         except ApiError:
             self.set_visible_child_name('error')
             return
@@ -285,17 +286,17 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
 
     def _on_remove_mix_track(self, _button, track_id):
-        task = self._run_mix(lambda client: client.dynamic_mix_remove(track_id))
+        task = self._run_mix(lambda client: client.dynamic_mix_remove(track_id),
+                             sync_queue=True)
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
-        # Si le mix est en cours de lecture, la piste quitte aussi la file
-        # tout de suite : retirée, elle ne doit plus être jouée.
-        playback = self._app.playback
-        if playback is not None:
-            playback.remove_source_tracks('smart', self._key, {track_id})
 
-    async def _run_mix(self, call):
+    async def _run_mix(self, call, sync_queue=False):
         """dynamic_mix_refresh renvoie une SmartPlaylist ; dynamic_mix_remove
-        un DynamicMixPlayed. Les deux exposent .tracks : on rafraîchit avec."""
+        un DynamicMixPlayed. Les deux exposent .tracks : on rafraîchit avec.
+
+        sync_queue (retrait manuel) : si le mix est en cours de lecture, la
+        file suit aussi — la piste retirée n'est plus jouée, même si c'est
+        celle en cours, et le complément du serveur est ajouté à la fin."""
         client = self._app.get_client()
         if client is None:
             return
@@ -304,6 +305,9 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         except ApiError:
             return
         self._apply(client, result.tracks)
+        playback = self._app.playback
+        if sync_queue and playback is not None:
+            playback.sync_dynamic_mix(result.tracks, yank_current=True)
 
     # ── Favoris ──────────────────────────────────────────────────────────────
 

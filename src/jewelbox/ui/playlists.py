@@ -168,7 +168,8 @@ class PlaylistsPage(Gtk.Stack):
         # expose pas (ou en cas d'erreur), la section reste simplement masquée
         # sans compromettre l'affichage des playlists utilisateur.
         try:
-            smart = await client.smart_playlists()
+            smart = await client.smart_playlists(
+                ranking_size=self._app.smart_ranking_size())
         except ApiError:
             smart = ()
         if generation != self._load_generation:

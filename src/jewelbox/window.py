@@ -1,6 +1,6 @@
 from gettext import gettext as _
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, Gio, Gtk
 
 import asyncio
 
@@ -122,7 +122,9 @@ class JewelboxWindow(Adw.ApplicationWindow):
         toolbar_view.add_top_bar(header_bar)
         toolbar_view.add_bottom_bar(self._player_bar)
         toolbar_view.add_bottom_bar(self._switcher_bar)
-        self.set_content(toolbar_view)
+        # Confirmations brèves (« Ajoutée à … ») : voir show_toast.
+        self._toasts = Adw.ToastOverlay(child=toolbar_view)
+        self.set_content(self._toasts)
 
         # Fenêtre étroite : le commutateur descend en barre du bas et le
         # titre reprend sa place dans la barre d'en-tête. (On ne peut pas
@@ -135,7 +137,36 @@ class JewelboxWindow(Adw.ApplicationWindow):
         breakpoint.add_setter(header_bar, 'title-widget', narrow_title)
         self.add_breakpoint(breakpoint)
 
+        # Fermer pendant une lecture : la fenêtre se masque et la musique
+        # continue (réglage « Lecture en arrière-plan »), voir
+        # JewelboxApplication.keeps_playing_in_background.
+        self.connect('close-request', self._on_close_request)
+
+        # Ctrl+F : onglet Recherche, curseur dans le champ.
+        search_action = Gio.SimpleAction.new('search', None)
+        search_action.connect('activate', lambda *_a: self.focus_search())
+        self.add_action(search_action)
+        app = self.get_application()
+        if app is not None:
+            app.set_accels_for_action('win.search', ['<primary>f'])
+
         self._refresh_server_hint()
+
+    def _on_close_request(self, *_args):
+        app = self.get_application()
+        if app is None or not app.keeps_playing_in_background():
+            return False
+        self.set_visible(False)
+        app.window_hidden()
+        return True
+
+    def focus_search(self):
+        self._nav.pop_to_page(self._root_page)
+        self._stack.set_visible_child(self._search)
+        self._search.focus_entry()
+
+    def show_toast(self, text: str):
+        self._toasts.add_toast(Adw.Toast(title=text, timeout=3))
 
     def _refresh_server_hint(self):
         """Chaque onglet gère seul son état « Aucun serveur configuré » via son
@@ -242,10 +273,9 @@ class JewelboxWindow(Adw.ApplicationWindow):
             self._nav.pop()
 
     def _build_main_menu(self):
-        from gi.repository import Gio
-
         menu = Gio.Menu()
         menu.append(_('Préférences'), 'app.preferences')
+        menu.append(_('Raccourcis clavier'), 'app.shortcuts')
         menu.append(_('À propos de JewelBox'), 'app.about')
         menu.append(_('Quitter'), 'app.quit')
         return menu

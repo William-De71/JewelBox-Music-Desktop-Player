@@ -25,6 +25,8 @@ class _MemorySettings:
     _DEFAULTS = {
         'server-url': '', 'server-id': '', 'device-id': '',
         'sort-order': 'artist',
+        'background-playback': True, 'notify-track-change': True,
+        'smart-ranking-size': 100,
     }
 
     def __init__(self):
@@ -42,6 +44,12 @@ class _MemorySettings:
     def set_boolean(self, key, value):
         self._values[key] = bool(value)
 
+    def get_int(self, key):
+        return int(self._values.get(key, 0))
+
+    def set_int(self, key, value):
+        self._values[key] = int(value)
+
 
 def _load_settings():
     source = Gio.SettingsSchemaSource.get_default()
@@ -50,6 +58,18 @@ def _load_settings():
     print('jewelbox: schéma GSettings absent, réglages non persistés '
           '(mode développement)', file=sys.stderr)
     return _MemorySettings()
+
+
+# (nom d'action app.*, raccourcis) — repris tels quels par la fenêtre
+# d'aide (ui/shortcuts.py) pour qu'elle ne puisse pas diverger.
+PLAYBACK_SHORTCUTS = (
+    ('play-pause', ['<primary>space']),
+    ('next', ['<primary>n']),
+    ('previous', ['<primary>b']),
+    ('toggle-shuffle', ['<primary>s']),
+    ('cycle-repeat', ['<primary>r']),
+    ('toggle-favorite', ['<primary>d']),
+)
 
 
 class JewelboxApplication(Adw.Application):
@@ -61,12 +81,26 @@ class JewelboxApplication(Adw.Application):
         self._client = None
         self.playback = None
         self._mpris = None
+        self._notifier = None
+        # Fenêtre masquée (lecture en arrière-plan) : minuterie de sortie
+        # quand plus rien ne joue, et demande au portail faite une seule fois.
+        self._idle_quit_source = 0
+        self._background_requested = False
         GLib.set_application_name('JewelBox Music Player')
 
         self._add_action('quit', lambda *_a: self.quit(), ['<primary>q'])
         self._add_action('preferences', self._on_preferences,
                          ['<primary>comma'])
         self._add_action('about', self._on_about)
+        self._add_action('shortcuts', self._on_shortcuts,
+                         ['<primary>question'])
+
+        # Commandes de lecture au clavier : mêmes combinaisons que GNOME
+        # Musique (Ctrl+Espace, Ctrl+N / Ctrl+B, Ctrl+S, Ctrl+R) — pas de
+        # Ctrl+←/→, qui déplacent le curseur par mot dans le champ de
+        # recherche. Ctrl+D (comme « marque-page ») bascule le favori.
+        for name, accels in PLAYBACK_SHORTCUTS:
+            self._add_action(name, self._on_playback_action, accels)
 
     def do_startup(self):
         Adw.Application.do_startup(self)
@@ -94,12 +128,19 @@ class JewelboxApplication(Adw.Application):
         from jewelbox.playback.mpris import MprisService
         self._mpris = MprisService(self, self.playback)
         self._mpris.start()
+        from jewelbox.playback.notifier import TrackNotifier
+        self._notifier = TrackNotifier(self, self.playback)
+        self._notifier.start()
+        self.playback.add_listener(self._on_playback_state)
 
     def do_activate(self):
+        # Une fenêtre masquée (lecture en arrière-plan) reste la fenêtre
+        # active de l'application : present() la réaffiche.
         window = self.props.active_window
         if window is None:
             window = JewelboxWindow(application=self)
         window.present()
+        self._cancel_idle_quit()
 
     def do_shutdown(self):
         # Dernier instantané avant de quitter : les sauvegardes en cours de
@@ -109,7 +150,109 @@ class JewelboxApplication(Adw.Application):
             self.playback.save_now()
         if self._mpris is not None:
             self._mpris.stop()
+        if self._notifier is not None:
+            self._notifier.stop()
+        self._cancel_idle_quit()
         Adw.Application.do_shutdown(self)
+
+    # ── Lecture en arrière-plan ──────────────────────────────────────────────
+
+    def keeps_playing_in_background(self) -> bool:
+        """Fermer la fenêtre pendant une lecture la masque au lieu de quitter
+        (réglage background-playback) : la musique continue, pilotable depuis
+        le menu système GNOME (MPRIS) ; rouvrir l'app ramène la fenêtre."""
+        if self.settings is None or self.playback is None:
+            return False
+        if not self.settings.get_boolean('background-playback'):
+            return False
+        return self.playback.is_playing
+
+    def window_hidden(self):
+        """Appelé par la fenêtre quand elle se masque au lieu de se fermer."""
+        self._request_background()
+        self._update_idle_quit()
+
+    def _on_playback_state(self, _state):
+        self._update_idle_quit()
+
+    def _update_idle_quit(self):
+        """Fenêtre masquée et plus rien ne joue (pause depuis le menu
+        système, fin de file) : on quitte au bout de _IDLE_QUIT_SECONDS plutôt
+        que de rester indéfiniment en arrière-plan. La reprise de la lecture
+        ou le retour de la fenêtre annulent l'échéance."""
+        window = self.props.active_window
+        hidden = window is not None and not window.get_visible()
+        playing = self.playback is not None and self.playback.is_playing
+        if hidden and not playing:
+            if not self._idle_quit_source:
+                self._idle_quit_source = GLib.timeout_add_seconds(
+                    self._IDLE_QUIT_SECONDS, self._on_idle_quit)
+        else:
+            self._cancel_idle_quit()
+
+    def _cancel_idle_quit(self):
+        if self._idle_quit_source:
+            GLib.source_remove(self._idle_quit_source)
+            self._idle_quit_source = 0
+
+    def _on_idle_quit(self):
+        self._idle_quit_source = 0
+        window = self.props.active_window
+        if window is not None and not window.get_visible():
+            self.quit()
+        return GLib.SOURCE_REMOVE
+
+    _IDLE_QUIT_SECONDS = 10 * 60
+
+    def _request_background(self):
+        """Flatpak : déclare au portail Background que l'app tourne sans
+        fenêtre (GNOME l'affiche alors comme « application en arrière-plan »
+        au lieu de la traiter comme figée). Best-effort, une fois par session ;
+        hors Flatpak, rien à demander."""
+        if self._background_requested or not Path('/.flatpak-info').exists():
+            return
+        self._background_requested = True
+        connection = self.get_dbus_connection()
+        if connection is None:
+            return
+        options = {
+            'reason': GLib.Variant(
+                's', _('Continuer la lecture fenêtre fermée')),
+            'autostart': GLib.Variant('b', False),
+        }
+        connection.call(
+            'org.freedesktop.portal.Desktop', '/org/freedesktop/portal/desktop',
+            'org.freedesktop.portal.Background', 'RequestBackground',
+            GLib.Variant('(sa{sv})', ('', options)), None,
+            Gio.DBusCallFlags.NONE, -1, None, self._on_background_reply)
+
+    @staticmethod
+    def _on_background_reply(connection, result):
+        try:
+            connection.call_finish(result)
+        except GLib.Error as error:
+            print(f'jewelbox: portail Background indisponible ({error.message})',
+                  file=sys.stderr)
+
+    # ── Raccourcis ───────────────────────────────────────────────────────────
+
+    def _on_playback_action(self, action, _param):
+        playback = self.playback
+        # File vide : rien à lire, mettre en pause ni passer.
+        if playback is None or not playback.has_item:
+            return
+        {
+            'play-pause': playback.toggle_play_pause,
+            'next': playback.next,
+            'previous': playback.previous,
+            'toggle-shuffle': playback.toggle_shuffle,
+            'cycle-repeat': playback.cycle_repeat,
+            'toggle-favorite': playback.toggle_favorite,
+        }[action.get_name()]()
+
+    def _on_shortcuts(self, *_args):
+        from jewelbox.ui.shortcuts import present_shortcuts
+        present_shortcuts(self.props.active_window)
 
     def _add_action(self, name, callback, accels=None):
         action = Gio.SimpleAction.new(name, None)
@@ -176,6 +319,12 @@ class JewelboxApplication(Adw.Application):
             except ValueError:
                 self._client = None
         return self._client
+
+    def smart_ranking_size(self) -> int | None:
+        """Taille choisie des classements intelligents (Préférences)."""
+        if self.settings is None:
+            return None
+        return self.settings.get_int('smart-ranking-size') or None
 
     def _on_preferences(self, *_args):
         from jewelbox.ui.preferences import PreferencesDialog
