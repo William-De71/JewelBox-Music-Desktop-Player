@@ -22,11 +22,14 @@ test:
 
 # GSK_RENDERER=cairo : rendu logiciel, tant que nouveau (Quadro P520) n'est
 # pas neutralisé — un sondage GL peut figer la machine (gel du 19/07/2026).
+# GNOTIFICATION_BACKEND=freedesktop : hors Flatpak et sans .desktop installé,
+# GNOME Shell ignore les notifications envoyées par le canal GTK (il ne
+# reconnaît pas l'app) ; le canal freedesktop, lui, les affiche.
 run:
-	cd src && GSK_RENDERER=cairo python3 -m jewelbox
+	cd src && GSK_RENDERER=cairo GNOTIFICATION_BACKEND=freedesktop python3 -m jewelbox
 
 run-gpu:
-	cd src && python3 -m jewelbox
+	cd src && GNOTIFICATION_BACKEND=freedesktop python3 -m jewelbox
 
 server:
 	cd $(SERVER_DIR) && npm run start --workspace=server

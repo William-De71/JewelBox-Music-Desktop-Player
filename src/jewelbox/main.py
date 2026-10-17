@@ -15,6 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from jewelbox import APP_ID, RESOURCE_PREFIX  # noqa: E402
 from jewelbox.api.client import JewelBoxClient  # noqa: E402
 from jewelbox.core.device import ensure_device_id  # noqa: E402
+from jewelbox.ui.shortcuts import PLAYBACK_SHORTCUTS  # noqa: E402
 from jewelbox.window import JewelboxWindow  # noqa: E402
 
 
@@ -60,16 +61,8 @@ def _load_settings():
     return _MemorySettings()
 
 
-# (nom d'action app.*, raccourcis) — repris tels quels par la fenêtre
-# d'aide (ui/shortcuts.py) pour qu'elle ne puisse pas diverger.
-PLAYBACK_SHORTCUTS = (
-    ('play-pause', ['<primary>space']),
-    ('next', ['<primary>n']),
-    ('previous', ['<primary>b']),
-    ('toggle-shuffle', ['<primary>s']),
-    ('cycle-repeat', ['<primary>r']),
-    ('toggle-favorite', ['<primary>d']),
-)
+# Notification « la lecture continue fenêtre fermée » (bouton Quitter).
+BACKGROUND_NOTIFICATION_ID = 'background'
 
 
 class JewelboxApplication(Adw.Application):
@@ -141,6 +134,9 @@ class JewelboxApplication(Adw.Application):
             window = JewelboxWindow(application=self)
         window.present()
         self._cancel_idle_quit()
+        # La fenêtre est revenue : l'avis « continue en arrière-plan » n'a
+        # plus lieu d'être.
+        self.withdraw_notification(BACKGROUND_NOTIFICATION_ID)
 
     def do_shutdown(self):
         # Dernier instantané avant de quitter : les sauvegardes en cours de
@@ -168,9 +164,19 @@ class JewelboxApplication(Adw.Application):
         return self.playback.is_playing
 
     def window_hidden(self):
-        """Appelé par la fenêtre quand elle se masque au lieu de se fermer."""
+        """Appelé par la fenêtre quand elle se masque au lieu de se fermer.
+
+        Une notification le signale, avec un bouton « Quitter » : la fenêtre
+        n'étant plus là, c'est le moyen le plus direct d'arrêter vraiment
+        l'application (le lecteur du menu système GNOME n'en propose pas)."""
         self._request_background()
         self._update_idle_quit()
+        notification = Gio.Notification.new(
+            _('JewelBox continue la lecture'))
+        notification.set_body(_('La fenêtre est fermée, la musique continue. '
+                                'Rouvrez JewelBox pour la retrouver.'))
+        notification.add_button(_('Quitter'), 'app.quit')
+        self.send_notification(BACKGROUND_NOTIFICATION_ID, notification)
 
     def _on_playback_state(self, _state):
         self._update_idle_quit()

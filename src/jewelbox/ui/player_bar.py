@@ -19,6 +19,8 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.add_to_playlist import present_add_to_playlist
+from jewelbox.ui.shortcuts import with_shortcut
 
 
 def _strv(values):
@@ -43,8 +45,9 @@ _VOLUME_WIDTH = 130
 # chaque seuil, la barre ne tient plus sans rogner, donc on retire l'élément le
 # moins essentiel. En dessous du dernier palier ne restent que pochette, titre
 # et les trois boutons de transport indispensables.
-_BREAK_COMPACT = 900    # curseur de volume masqué, pochette et texte réduits
-_BREAK_TIGHT = 640      # aléatoire / répétition / favori masqués
+# 940 : +40 px pour le bouton « ajouter à une playlist » de la zone droite.
+_BREAK_COMPACT = 940    # curseur de volume masqué, pochette et texte réduits
+_BREAK_TIGHT = 640      # aléatoire / répétition / favori / ajout masqués
 _BREAK_MINIMAL = 460    # barre de progression et minutages masqués
 
 # Largeur demandée par la barre entièrement repliée. Mesurée sur la CenterBox
@@ -180,6 +183,7 @@ class PlayerBar(Adw.BreakpointBin):
         self._seeking = False   # vrai pendant un glisser manuel du curseur
         self._cover_url = None
         self._volume = 1.0      # dernier volume non nul, pour le rétablir
+        self._current_track_id = None  # cible du bouton « ajouter à une playlist »
         # Appelé quand l'utilisateur clique la zone info (pochette + titre) :
         # ouvre le grand lecteur, comme un tap sur le mini-lecteur Android.
         self.on_open_full_player = None
@@ -254,8 +258,9 @@ class PlayerBar(Adw.BreakpointBin):
 
     def _tight_setters(self):
         """Deuxième repli : ne restent que précédent / lecture / suivant. Le
-        mode aléatoire, la répétition et le favori restent accessibles dans le
-        grand lecteur, qu'un clic sur la pochette ouvre.
+        mode aléatoire, la répétition, le favori et l'ajout à une playlist
+        restent accessibles dans le grand lecteur, qu'un clic sur la pochette
+        ouvre.
 
         Le bouton « fermer » est conservé, lui : il n'existe nulle part
         ailleurs, et le masquer rendrait impossible d'arrêter la lecture en
@@ -264,6 +269,7 @@ class PlayerBar(Adw.BreakpointBin):
             (self._shuffle_button, 'visible', False),
             (self._repeat_button, 'visible', False),
             (self._favorite_button, 'visible', False),
+            (self._add_button, 'visible', False),
         )
 
     def _minimal_setters(self):
@@ -346,7 +352,7 @@ class PlayerBar(Adw.BreakpointBin):
     def _build_center(self):
         self._shuffle_button = Gtk.ToggleButton(
             icon_name='media-playlist-shuffle-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Lecture aléatoire'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Lecture aléatoire'), 'toggle-shuffle'))
         # _updating_shuffle protège le set_active programmatique de _on_state :
         # sans lui, resynchroniser le bouton réémettrait « toggled », donc
         # rappellerait toggle_shuffle → _publish → _on_state… en boucle (même
@@ -357,27 +363,27 @@ class PlayerBar(Adw.BreakpointBin):
         self._previous_button = Gtk.Button(
             icon_name='media-skip-backward-symbolic',
             css_classes=['flat'], valign=Gtk.Align.CENTER,
-            tooltip_text=_('Précédent'))
+            tooltip_text=with_shortcut(_('Précédent'), 'previous'))
         self._previous_button.connect(
             'clicked', lambda *_a: self._app.playback.previous())
 
         self._play_pause_button = Gtk.Button(
             icon_name='media-playback-start-symbolic',
             css_classes=['flat', 'circular', 'jewelbox-transport-play'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Lecture/Pause'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Lecture/Pause'), 'play-pause'))
         self._play_pause_button.connect(
             'clicked', lambda *_a: self._app.playback.toggle_play_pause())
 
         self._next_button = Gtk.Button(
             icon_name='media-skip-forward-symbolic',
             css_classes=['flat'], valign=Gtk.Align.CENTER,
-            tooltip_text=_('Suivant'))
+            tooltip_text=with_shortcut(_('Suivant'), 'next'))
         self._next_button.connect(
             'clicked', lambda *_a: self._app.playback.next())
 
         self._repeat_button = Gtk.Button(
             icon_name='media-playlist-repeat-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Répétition'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Répétition'), 'cycle-repeat'))
         self._repeat_button.connect(
             'clicked', lambda *_a: self._app.playback.cycle_repeat())
 
@@ -428,12 +434,19 @@ class PlayerBar(Adw.BreakpointBin):
         center.append(self._progress_box)
         return center
 
-    # ── Zone droite : favori · volume · fermer ───────────────────────────────
+    # ── Zone droite : ajout · favori · volume · fermer ───────────────────────
 
     def _build_right(self):
+        # Ajouter la piste en cours à une playlist, sans ouvrir le grand
+        # lecteur ni retrouver l'album.
+        self._add_button = Gtk.Button(
+            icon_name='list-add-symbolic', css_classes=['flat'],
+            valign=Gtk.Align.CENTER, tooltip_text=_('Ajouter à une playlist'))
+        self._add_button.connect('clicked', self._on_add_to_playlist)
+
         self._favorite_button = Gtk.ToggleButton(
             icon_name='jewelbox-not-favorite-symbolic', css_classes=['flat'],
-            valign=Gtk.Align.CENTER, tooltip_text=_('Favori'))
+            valign=Gtk.Align.CENTER, tooltip_text=with_shortcut(_('Favori'), 'toggle-favorite'))
         self._favorite_button.connect('toggled', self._on_favorite_toggled)
 
         self._volume_button = Gtk.Button(
@@ -457,6 +470,7 @@ class PlayerBar(Adw.BreakpointBin):
 
         right = Gtk.Box(spacing=4, halign=Gtk.Align.END,
                         valign=Gtk.Align.CENTER)
+        right.append(self._add_button)
         right.append(self._favorite_button)
         right.append(self._volume_button)
         right.append(self._volume_scale)
@@ -464,6 +478,11 @@ class PlayerBar(Adw.BreakpointBin):
         return right
 
     # ── Interactions ─────────────────────────────────────────────────────────
+
+    def _on_add_to_playlist(self, _button):
+        if self._current_track_id is not None:
+            present_add_to_playlist(self._app, self,
+                                    track_id=self._current_track_id)
 
     def _on_seek_change_value(self, _scale, _scroll_type, value):
         # Toute interaction (clic, glisser, clavier, molette). On seek tout de
@@ -530,6 +549,7 @@ class PlayerBar(Adw.BreakpointBin):
         self.set_visible(self._has_item)
 
     def _on_state(self, state):
+        self._current_track_id = state.current_track_id
         self._has_item = state.has_item
         # Tant que le grand lecteur est ouvert, le mini-lecteur reste masqué :
         # on met quand même à jour le contenu ci-dessous (il sera à jour au
