@@ -28,5 +28,21 @@
       <default>false</default>
       <summary>Grouper la bibliothèque par artiste</summary>
     </key>
+    <key name="background-playback" type="b">
+      <default>true</default>
+      <summary>Lecture en arrière-plan</summary>
+      <description>Fermer la fenêtre pendant une lecture la masque au lieu de quitter : la musique continue, pilotable depuis le menu système</description>
+    </key>
+    <key name="notify-track-change" type="b">
+      <default>true</default>
+      <summary>Notifier le changement de piste</summary>
+      <description>Notification système (titre, artiste, pochette) à chaque nouvelle piste quand la fenêtre n'a pas le focus</description>
+    </key>
+    <key name="smart-ranking-size" type="i">
+      <range min="1" max="1000"/>
+      <default>100</default>
+      <summary>Taille des classements</summary>
+      <description>Nombre de pistes des listes intelligentes Ajouts récents, Écoutées récemment et Les plus écoutées (serveur ≥ 1.15 ; ignoré par les plus anciens)</description>
+    </key>
   </schema>
 </schemalist>

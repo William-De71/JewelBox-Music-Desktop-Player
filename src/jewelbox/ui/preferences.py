@@ -1,4 +1,6 @@
-"""Dialogue Préférences : configuration du serveur JewelBox.
+"""Dialogue Préférences : configuration du serveur JewelBox (page Serveur)
+et réglages de lecture (page Lecture : arrière-plan, notifications, taille
+des classements intelligents).
 
 Même logique que l'écran Réglages du client Android (SettingsViewModel) :
 « Enregistrer » persiste l'URL normalisée immédiatement — même serveur
@@ -67,6 +69,60 @@ class PreferencesDialog(Adw.PreferencesDialog):
         close_group = Adw.PreferencesGroup()
         close_group.add(close_button)
         page.add(close_group)
+
+        self._add_playback_page()
+
+    # Tailles proposées pour les classements « top N » des listes
+    # intelligentes (le serveur accepte 1 à 1000).
+    _RANKING_SIZES = (50, 100, 200, 500, 1000)
+
+    def _add_playback_page(self):
+        page = Adw.PreferencesPage(
+            title=_('Lecture'), icon_name='audio-x-generic-symbolic')
+        self.add(page)
+        group = Adw.PreferencesGroup()
+        page.add(group)
+
+        background = Adw.SwitchRow(
+            title=_('Lecture en arrière-plan'),
+            subtitle=_('Fermer la fenêtre pendant une lecture la masque : '
+                       'la musique continue, pilotable depuis le menu système.'),
+            active=self._settings.get_boolean('background-playback'))
+        background.connect('notify::active', self._on_switch_changed,
+                           'background-playback')
+        group.add(background)
+
+        notify = Adw.SwitchRow(
+            title=_('Notifier le changement de piste'),
+            subtitle=_('Quand la fenêtre n’est pas au premier plan.'),
+            active=self._settings.get_boolean('notify-track-change'))
+        notify.connect('notify::active', self._on_switch_changed,
+                       'notify-track-change')
+        group.add(notify)
+
+        sizes = Gtk.StringList.new([str(n) for n in self._RANKING_SIZES])
+        ranking = Adw.ComboRow(
+            title=_('Taille des classements'),
+            subtitle=_('Pistes des listes Ajouts récents, Écoutées récemment '
+                       'et Les plus écoutées.'),
+            model=sizes)
+        current = self._settings.get_int('smart-ranking-size')
+        if current in self._RANKING_SIZES:
+            ranking.set_selected(self._RANKING_SIZES.index(current))
+        else:
+            # Valeur posée hors de la liste (dconf) : on l'affiche telle quelle.
+            sizes.append(str(current))
+            ranking.set_selected(sizes.get_n_items() - 1)
+        ranking.connect('notify::selected', self._on_ranking_changed)
+        group.add(ranking)
+
+    def _on_switch_changed(self, row, _pspec, key):
+        self._settings.set_boolean(key, row.get_active())
+
+    def _on_ranking_changed(self, row, _pspec):
+        item = row.get_selected_item()
+        if item is not None:
+            self._settings.set_int('smart-ranking-size', int(item.get_string()))
 
     # ── Actions ──────────────────────────────────────────────────────────────
 

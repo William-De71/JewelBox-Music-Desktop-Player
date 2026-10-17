@@ -19,6 +19,7 @@ from gi.repository import Adw, GLib, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.add_to_playlist import present_add_to_playlist
 
 
 class AlbumDetailPage(Gtk.Stack):
@@ -113,6 +114,16 @@ class AlbumDetailPage(Gtk.Stack):
         header.append(self._artist_label)
         header.append(self._meta_label)
         header.append(self._notes_label)
+
+        # « Ajouter à une playlist » pour l'album entier (parité avec l'icône
+        # de la barre de l'écran album Android).
+        add_album = Gtk.Button(
+            halign=Gtk.Align.CENTER, margin_top=8, css_classes=['pill'])
+        add_album.set_child(Adw.ButtonContent(
+            icon_name='list-add-symbolic', label=_('Ajouter à une playlist')))
+        add_album.connect('clicked', lambda *_a: present_add_to_playlist(
+            self._app, self, album_id=self._album_id))
+        header.append(add_album)
 
         self._tracks_box = Gtk.ListBox(
             selection_mode=Gtk.SelectionMode.NONE,
@@ -236,12 +247,20 @@ class AlbumDetailPage(Gtk.Stack):
         favorite_button.connect(
             'toggled', self._on_favorite_toggled, client, track.id)
 
+        add_button = Gtk.Button(
+            icon_name='list-add-symbolic', valign=Gtk.Align.CENTER,
+            css_classes=['flat'], tooltip_text=_('Ajouter à une playlist'))
+        add_button.connect('clicked', lambda *_a, track_id=track.id:
+                           present_add_to_playlist(self._app, self,
+                                                   track_id=track_id))
+
         row_box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6,
                           margin_start=12, margin_end=12)
         row_box.append(leading)
         row_box.append(title_label)
         row_box.append(duration_label)
         row_box.append(favorite_button)
+        row_box.append(add_button)
 
         row = Gtk.ListBoxRow(activatable=track.has_file, child=row_box)
         if not track.has_file:

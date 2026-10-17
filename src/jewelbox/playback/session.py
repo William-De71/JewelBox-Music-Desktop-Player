@@ -11,7 +11,9 @@ core.playback_state.PlaybackStateStore à chaque changement, et rechargée au
 démarrage en PAUSE à sa position exacte (parité avec restoreSavedQueue()
 côté Android — l'utilisateur appuie sur lecture pour repartir).
 
-Pas de mix dynamique pour cette itération.
+Mix dynamique : une piste du mix écoutée jusqu'au bout est signalée au
+serveur, qui la retire et recomplète la liste ; la file suit (parité avec
+PlayerConnection.onTrackEnded côté Android, voir core.dynamic_mix).
 """
 
 import asyncio
@@ -20,6 +22,8 @@ from dataclasses import dataclass
 from gettext import gettext as _
 
 from jewelbox.api.client import ApiError
+from jewelbox.core import dynamic_mix
+from jewelbox.core.dynamic_mix import DYNAMIC_MIX_KEY
 from jewelbox.core.queue import Queue, QueueItem
 from jewelbox.core.scrobble import ScrobbleTracker
 
@@ -131,6 +135,14 @@ class PlaybackSession:
         # drapeau `restoring` d'Android).
         self._restoring = False
 
+    @property
+    def is_playing(self) -> bool:
+        return self._player.is_playing
+
+    @property
+    def has_item(self) -> bool:
+        return self._queue.state().has_item
+
     # ── Démarrage d'une lecture ──────────────────────────────────────────────
 
     def play_album(self, album, start_track_id: int):
@@ -174,11 +186,7 @@ class PlaybackSession:
         playable = [t for t in tracks if t.has_file]
         if not playable:
             return
-        items = [_item_from_track(
-                    track, track.album_title, track.artist_name,
-                    client.stream_url(track.id),
-                    client.resolve_cover(track.cover_url))
-                for track in playable]
+        items = self._items_for(client, playable)
         self._source_name = source_name
         if report_playlist_id is not None:
             self._set_source('playlist', report_playlist_id)
@@ -409,16 +417,20 @@ class PlaybackSession:
         if self._pending_gapless <= 0:
             return
         self._pending_gapless -= 1
+        ended = self._queue.state().current
         state = self._queue.track_ended()
         # already_playing : playbin3 joue déjà le bon flux, on ne recharge pas.
         self._load_from_state(state, already_playing=True)
+        self._mix_track_played(ended, exhausted=state.current is None)
 
     def _on_track_ended(self):
         """EOS : atteint seulement quand aucune URI suivante n'avait été
         fournie (dernière piste, ou file épuisée). L'enchaînement gapless,
         lui, passe par _on_stream_started."""
+        ended = self._queue.state().current
         state = self._queue.track_ended()
         self._load_from_state(state, already_playing=False)
+        self._mix_track_played(ended, exhausted=state.current is None)
 
     def _on_about_to_finish(self):
         """playbin3 va manquer de données : lui donner tout de suite l'URI
@@ -438,6 +450,83 @@ class PlaybackSession:
     def _on_error(self, message):
         self._last_error = message
         self._publish()
+
+    # ── Mix dynamique ────────────────────────────────────────────────────────
+
+    def _is_dynamic_mix(self) -> bool:
+        return self._source_type == 'smart' and self._source_id == DYNAMIC_MIX_KEY
+
+    def _mix_track_played(self, ended, exhausted: bool):
+        """Une piste s'est terminée naturellement (pas un saut manuel) : en
+        mix dynamique, le serveur la retire et recomplète le bas de la liste.
+        exhausted : plus rien à jouer, on repart alors sur la liste fraîche."""
+        if ended is None or not self._is_dynamic_mix():
+            return
+        client = self._get_client()
+        if client is not None:
+            self._run(self._consume_mix_track(client, ended.track_id, exhausted))
+
+    async def _consume_mix_track(self, client, track_id, exhausted):
+        try:
+            result = await client.dynamic_mix_played(track_id)
+        except ApiError:
+            return
+        # Une autre file a pu prendre le relais pendant la requête.
+        if self._is_dynamic_mix():
+            self.sync_dynamic_mix(result.tracks, restart=exhausted)
+
+    def sync_dynamic_mix(self, tracks, restart: bool = False,
+                         yank_current: bool = False):
+        """Aligne la file sur la liste du mix renvoyée par le serveur (après
+        une rotation ou un retrait manuel). Sans effet si la file en cours
+        n'est pas le mix dynamique.
+
+        restart : la file était épuisée, on relance sur la liste fraîche.
+        yank_current : retrait manuel — la piste en cours part aussi (on passe
+        à la suivante) ; une rotation ne coupe jamais la piste écoutée."""
+        if not self._is_dynamic_mix():
+            return
+        client = self._get_client()
+        if client is None:
+            return
+        playable = [t for t in tracks if t.has_file]
+        if restart:
+            if not playable:
+                return
+            self._queue.load(self._items_for(client, playable))
+            self._start_current(client)
+            return
+
+        state = self._queue.state()
+        current_id = state.current.track_id if state.current else None
+        plan = dynamic_mix.plan([item.track_id for item in state.items],
+                                [t.id for t in playable])
+        by_id = {t.id: t for t in playable}
+        # Ajouter avant de retirer : retirer la piste en cours lui laisse
+        # ainsi toujours une suivante sur laquelle retomber.
+        state = self._queue.append(self._items_for(
+            client, [by_id[i] for i in plan.append_ids]))
+        current_removed = False
+        for track_id in plan.remove_ids:
+            if track_id == current_id:
+                if not yank_current:
+                    continue
+                current_removed = True
+            state = self._queue.remove(track_id)
+        if current_removed:
+            self._load_from_state(state)
+            return
+        if plan.append_ids or plan.remove_ids:
+            self._publish(state)
+            self._save_state()
+
+    @staticmethod
+    def _items_for(client, tracks):
+        return [_item_from_track(
+                    track, track.album_title, track.artist_name,
+                    client.stream_url(track.id),
+                    client.resolve_cover(track.cover_url))
+                for track in tracks]
 
     # ── Historique d'accueil ─────────────────────────────────────────────────
 
@@ -484,6 +573,7 @@ class PlaybackSession:
             source_type=self._source_type,
             source_id=self._source_id,
             source_name=self._source_name,
+            dynamic_mix=self._is_dynamic_mix(),
             position_ms=int(max(0.0, position) * 1000),
         ))
 

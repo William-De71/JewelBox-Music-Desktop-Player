@@ -571,3 +571,48 @@ def test_remove_track_before_current_keeps_current():
     state = queue.remove(1)
     assert state.current.track_id == 3
     assert queue.next().current.track_id == 4
+
+
+# ── ajout en fin de file ──────────────────────────────────────────────────────
+
+def test_append_adds_items_at_the_end_without_moving_current():
+    queue = Queue()
+    queue.load(make_items(2), start_index=1)
+    extra = make_items(4)[2:]
+    state = queue.append(extra)
+    assert [i.track_id for i in state.items] == [1, 2, 3, 4]
+    assert state.current.track_id == 2
+    assert queue.next().current.track_id == 3
+
+
+def test_append_nothing_is_a_no_op():
+    queue = Queue()
+    queue.load(make_items(2))
+    assert len(queue.append([]).items) == 2
+
+
+def test_append_goes_after_the_shuffled_order():
+    queue = Queue()
+    queue.load(make_items(4), start_index=0)
+    queue.set_shuffle(True)
+    drawn = [queue._items[i].track_id for i in queue._order]
+    queue.append(make_items(6)[4:])
+    played = [queue.state().current.track_id]
+    while queue.has_next():
+        played.append(queue.next().current.track_id)
+    assert played == drawn + [5, 6]
+
+
+def test_append_to_exhausted_queue_stays_exhausted():
+    queue = Queue()
+    queue.load(make_items(1))
+    queue.track_ended()
+    state = queue.append(make_items(3)[1:])
+    assert state.current is None
+    assert len(state.items) == 3
+
+
+def test_append_to_empty_queue_starts_at_first_item():
+    queue = Queue()
+    state = queue.append(make_items(2))
+    assert state.current.track_id == 1

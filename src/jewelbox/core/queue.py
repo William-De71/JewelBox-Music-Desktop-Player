@@ -209,6 +209,26 @@ class Queue:
                 break
         return self.state()
 
+    def append(self, items) -> QueueState:
+        """Ajoute des pistes en fin de file (ex. le mix dynamique recomplété
+        par le serveur). Elles viennent aussi en fin d'ordre de lecture, même
+        en mode aléatoire : le tirage déjà fait reste intact.
+
+        Une file épuisée (lecture arrivée au bout) reste épuisée : c'est à
+        l'appelant de relancer, comme après un load()."""
+        items = list(items)
+        if not items:
+            return self.state()
+        start = len(self._items)
+        exhausted = bool(self._order) and self._position >= len(self._order)
+        self._items.extend(items)
+        self._order.extend(range(start, start + len(items)))
+        if exhausted:
+            # Garder la position « au-delà de la fin » : sans ça, la première
+            # piste ajoutée deviendrait courante sans avoir été chargée.
+            self._position = len(self._order)
+        return self.state()
+
     def remove(self, track_id: int) -> QueueState:
         """Retire une piste (ex. retrait manuel d'une playlist en cours de
         lecture), même si c'est celle en cours — la position se recale sur la

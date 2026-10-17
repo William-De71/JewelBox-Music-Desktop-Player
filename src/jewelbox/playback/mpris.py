@@ -112,6 +112,13 @@ _INTROSPECTION = '''
 _LOOP_STATUS = {'off': 'None', 'all': 'Playlist', 'one': 'Track'}
 
 
+def cover_cache_path(cover_url) -> Path:
+    """Fichier local où la pochette d'une URL est mise en cache (partagé avec
+    les notifications de changement de piste)."""
+    digest = hashlib.sha1(cover_url.encode('utf-8')).hexdigest()
+    return Path(GLib.get_user_cache_dir()) / 'jewelbox' / 'covers' / digest
+
+
 def _microseconds(seconds: float) -> int:
     return int(max(0.0, seconds or 0.0) * 1_000_000)
 
@@ -271,17 +278,12 @@ class MprisService:
         self._art_uri = ''
         if not cover_url:
             return
-        path = self._art_cache_path(cover_url)
+        path = cover_cache_path(cover_url)
         if path.exists():
             self._art_uri = path.as_uri()
             return
         task = self._download_art(cover_url, path)
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
-
-    @staticmethod
-    def _art_cache_path(cover_url) -> Path:
-        digest = hashlib.sha1(cover_url.encode('utf-8')).hexdigest()
-        return Path(GLib.get_user_cache_dir()) / 'jewelbox' / 'covers' / digest
 
     async def _download_art(self, cover_url, path):
         client = self._app.get_client()

@@ -16,6 +16,7 @@ omit = [
     "src/jewelbox/playback/player.py",
     "src/jewelbox/playback/session.py",
     "src/jewelbox/playback/mpris.py",
+    "src/jewelbox/playback/notifier.py",
     "src/jewelbox/discovery/*",
 ]
 

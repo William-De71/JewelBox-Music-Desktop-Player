@@ -26,6 +26,7 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gio, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.add_to_playlist import present_add_to_playlist
 
 # Le serveur exige q >= 2 caractères ; plus court, on n'appelle pas.
 _MIN_QUERY = 2
@@ -122,6 +123,9 @@ class SearchPage(Gtk.Stack):
         outer.append(self._body)
         self.add_named(outer, 'main')
         self.set_visible_child_name('main')
+
+    def focus_entry(self):
+        self._entry.grab_focus()
 
     def reload(self):
         """Appelée par la fenêtre (construction, fermeture des Préférences).
@@ -347,10 +351,18 @@ class SearchPage(Gtk.Stack):
             css_classes=['dim-label'], valign=Gtk.Align.CENTER)
 
         row_box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6,
-                          margin_start=8, margin_end=12)
+                          margin_start=8, margin_end=8)
         row_box.append(cover)
         row_box.append(text)
         row_box.append(duration_label)
+        if track.has_file:
+            add_button = Gtk.Button(
+                icon_name='list-add-symbolic', valign=Gtk.Align.CENTER,
+                css_classes=['flat'], tooltip_text=_('Ajouter à une playlist'))
+            add_button.connect('clicked', lambda *_a, track_id=track.id:
+                               present_add_to_playlist(self._app, self,
+                                                       track_id=track_id))
+            row_box.append(add_button)
 
         row = Gtk.ListBoxRow(activatable=track.has_file, child=row_box)
         if not track.has_file:

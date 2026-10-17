@@ -238,7 +238,8 @@ class HomePage(Gtk.Stack):
     async def _load(self, client, generation):
         self.set_visible_child_name('loading')
         try:
-            home = await client.home()
+            home = await client.home(
+                ranking_size=self._app.smart_ranking_size())
         except ApiError as error:
             if generation != self._load_generation:
                 return
@@ -680,7 +681,8 @@ class HomePage(Gtk.Stack):
         if client is None or playback is None:
             return
         try:
-            smart = await client.smart_playlist(key)
+            smart = await client.smart_playlist(
+                key, ranking_size=self._app.smart_ranking_size())
         except ApiError:
             return  # best-effort, comme le reste de l'app
         if smart.tracks:

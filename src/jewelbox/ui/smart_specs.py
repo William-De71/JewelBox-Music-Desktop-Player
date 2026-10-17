@@ -15,7 +15,7 @@ Material choisies sur mobile.
 from dataclasses import dataclass
 from gettext import gettext as _
 
-DYNAMIC_MIX_KEY = 'dynamic_mix'
+from jewelbox.core.dynamic_mix import DYNAMIC_MIX_KEY
 
 
 @dataclass(frozen=True)

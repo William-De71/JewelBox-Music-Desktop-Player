@@ -120,9 +120,12 @@ class JewelBoxClient:
 
     # ── Accueil, recherche ───────────────────────────────────────────────────
 
-    async def home(self):
-        """Flux d'accueil : 8 récents + 12 suggestions (serveur >= 1.9)."""
-        return parsing.parse_home(await self._get('/api/player/home'))
+    async def home(self, ranking_size: int | None = None):
+        """Flux d'accueil : 8 récents + 12 suggestions (serveur >= 1.9).
+        ranking_size : voir smart_playlists() — taille des classements, pour
+        le nombre de pistes affiché sur une tuile intelligente récente."""
+        query = None if ranking_size is None else {'smart_limit': ranking_size}
+        return parsing.parse_home(await self._get('/api/player/home', query))
 
     async def search(self, query: str):
         """Recherche bibliothèque (serveur >= 1.7) ; q >= 2 caractères."""
@@ -213,11 +216,16 @@ class JewelBoxClient:
 
     # ── Smart playlists ──────────────────────────────────────────────────────
 
-    async def smart_playlists(self):
-        return parsing.parse_smart_playlists(await self._get('/api/smart-playlists'))
+    async def smart_playlists(self, ranking_size: int | None = None):
+        """ranking_size : taille des classements « top N » (Ajouts récents,
+        Écoutées récemment, Les plus écoutées) ; un serveur qui ne connaît pas
+        ?limit= l'ignore et garde ses 100 pistes."""
+        return parsing.parse_smart_playlists(await self._get(
+            '/api/smart-playlists', _ranking_query(ranking_size)))
 
-    async def smart_playlist(self, key: str):
-        return parsing.parse_smart_playlist(await self._get(f'/api/smart-playlists/{key}'))
+    async def smart_playlist(self, key: str, ranking_size: int | None = None):
+        return parsing.parse_smart_playlist(await self._get(
+            f'/api/smart-playlists/{key}', _ranking_query(ranking_size)))
 
     async def dynamic_mix_played(self, track_id: int):
         """Piste du mix terminée : le serveur tourne et recomplète la liste."""
@@ -243,3 +251,7 @@ class JewelBoxClient:
     async def scrobble(self, track_id: int, started_at: int) -> None:
         await self._post('/api/lastfm/scrobble',
                          {'track_id': track_id, 'started_at': started_at})
+
+
+def _ranking_query(ranking_size):
+    return None if ranking_size is None else {'limit': ranking_size}
