@@ -106,6 +106,9 @@ class PlaybackSession:
         # d'abonnés plutôt qu'un callback unique. on_state_changed reste un
         # raccourci pratique pour un abonné unique (scripts, tests).
         self._listeners: list = []
+        # Abonnés à la liste du mix dynamique (la fiche ouverte) : chaque
+        # rotation leur transmet la liste fraîche renvoyée par le serveur.
+        self._mix_listeners: list = []
         self.on_state_changed = None
         self._last_error: str | None = None
         # Posé par _on_about_to_finish quand playbin3 a déjà reçu l'URI
@@ -607,6 +610,8 @@ class PlaybackSession:
             result = await client.dynamic_mix_played(track_id)
         except ApiError:
             return
+        for listener in list(self._mix_listeners):
+            listener(result.tracks)
         # Une autre file a pu prendre le relais pendant la requête.
         if self._is_dynamic_mix():
             self.sync_dynamic_mix(result.tracks, restart=exhausted)
@@ -802,6 +807,15 @@ class PlaybackSession:
     def remove_listener(self, listener):
         if listener in self._listeners:
             self._listeners.remove(listener)
+
+    def add_mix_listener(self, listener):
+        """Abonne un callback(pistes) appelé après chaque rotation du mix
+        dynamique, avec la liste à jour du serveur."""
+        self._mix_listeners.append(listener)
+
+    def remove_mix_listener(self, listener):
+        if listener in self._mix_listeners:
+            self._mix_listeners.remove(listener)
 
     def _publish(self, queue_state=None, position=None, duration=None):
         state = self._build_state(queue_state, position, duration)

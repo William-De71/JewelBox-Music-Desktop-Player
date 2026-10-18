@@ -69,6 +69,9 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         # ouverture. Voir le même motif dans playlist_detail.
         self._playback = application.playback
         self._subscribed = False
+        # Mix dynamique : une rotation survenue pendant que la page était
+        # masquée (autre page affichée) impose de recharger à son retour.
+        self._mix_stale = False
         self.connect('map', self._on_map)
         self.connect('unmap', self._on_unmap)
 
@@ -77,11 +80,19 @@ class SmartPlaylistDetailPage(Gtk.Stack):
     def _on_map(self, *_args):
         if self._playback is not None and not self._subscribed:
             self._playback.add_listener(self._on_playback_state)
+            if self._is_dynamic:
+                self._playback.add_mix_listener(self._on_mix_rotated)
             self._subscribed = True
+        if self._mix_stale:
+            self._mix_stale = False
+            self.reload(quiet=True)
 
     def _on_unmap(self, *_args):
         if self._playback is not None and self._subscribed:
             self._playback.remove_listener(self._on_playback_state)
+            if self._is_dynamic:
+                self._playback.remove_mix_listener(self._on_mix_rotated)
+                self._mix_stale = True
             self._subscribed = False
 
     def title(self):
@@ -140,12 +151,15 @@ class SmartPlaylistDetailPage(Gtk.Stack):
 
     # ── Chargement ───────────────────────────────────────────────────────────
 
-    def reload(self):
+    def reload(self, quiet=False):
+        """quiet : rafraîchit en place, sans repasser par l'écran de
+        chargement (retour sur une page déjà affichée)."""
         client = self._app.get_client()
         if client is None:
             self.set_visible_child_name('error')
             return
-        self.set_visible_child_name('loading')
+        if not quiet:
+            self.set_visible_child_name('loading')
         task = self._load(client)
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
 
@@ -308,6 +322,13 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         playback = self._app.playback
         if sync_queue and playback is not None:
             playback.sync_dynamic_mix(result.tracks, yank_current=True)
+
+    def _on_mix_rotated(self, tracks):
+        """Une piste du mix a été jouée jusqu'au bout : le serveur l'a
+        retirée et a recomplété la liste ; la fiche suit, comme la file."""
+        client = self._app.get_client()
+        if client is not None:
+            self._apply(client, tracks)
 
     # ── Favoris ──────────────────────────────────────────────────────────────
 
