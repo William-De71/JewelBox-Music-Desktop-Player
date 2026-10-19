@@ -141,6 +141,10 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # continue (réglage « Lecture en arrière-plan »), voir
         # JewelboxApplication.keeps_playing_in_background.
         self.connect('close-request', self._on_close_request)
+        # Fenêtre réaffichée (souvent restée en arrière-plan) : on a pu écouter
+        # sur le téléphone entre-temps, la carte « Reprendre » de l'Accueil
+        # doit le refléter.
+        self.connect('notify::is-active', self._on_active_changed)
 
         # Ctrl+F : onglet Recherche, curseur dans le champ.
         search_action = Gio.SimpleAction.new('search', None)
@@ -179,6 +183,10 @@ class JewelboxWindow(Adw.ApplicationWindow):
         self._library.reload()
         self._search.reload()
         self._playlists.reload()
+
+    def _on_active_changed(self, *_args):
+        if self.is_active() and self._stack.get_visible_child() is self._home:
+            self._home.refresh_resume()
 
     def _on_tab_changed(self, *_args):
         # pop_to_page(racine) est un no-op si on y est déjà : sûr à appeler à

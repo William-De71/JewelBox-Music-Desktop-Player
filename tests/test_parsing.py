@@ -345,6 +345,21 @@ def test_queue_devices():
     assert devices[0].track_count == 12
     assert devices[1].device_label is None
     assert devices[1].current_index == -1
+    assert devices[1].source_label is None
+    assert devices[1].current_title is None
+
+
+def test_queue_devices_what_was_playing():
+    devices = parsing.parse_queue_devices({'data': [
+        {'device_id': 'phone', 'source_label': 'Mix dynamique',
+         'current_track': {'id': 4, 'title': 'Airbag',
+                           'artist_name': 'Radiohead'}},
+        {'device_id': 'web', 'current_track': 'garbage'},
+    ]})
+    assert devices[0].source_label == 'Mix dynamique'
+    assert devices[0].current_title == 'Airbag'
+    assert devices[0].current_artist == 'Radiohead'
+    assert devices[1].current_title is None
 
 
 def test_queue_devices_missing_id_raises():
@@ -363,6 +378,9 @@ def test_device_queue():
     assert queue.current_index == 1
     assert [t.id for t in queue.tracks] == [1, 2]
     assert queue.tracks[0].entry_id == 9
+    assert queue.source_label is None
+    assert parsing.parse_device_queue(
+        {'device_id': 'x', 'source_label': 'Mix'}).source_label == 'Mix'
 
 
 def test_device_queue_defaults_and_bad_position():

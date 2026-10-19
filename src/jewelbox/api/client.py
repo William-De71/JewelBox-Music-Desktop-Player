@@ -260,11 +260,15 @@ class JewelBoxClient:
     # ── File partagée entre appareils (X-Device-Id) ──────────────────────────
 
     async def save_queue(self, track_ids, current_index: int,
-                         position_sec: float, device_label: str) -> None:
-        """Remplace la file de CET appareil sur le serveur."""
+                         position_sec: float, device_label: str,
+                         source_label: str | None = None) -> None:
+        """Remplace la file de CET appareil sur le serveur. source_label :
+        d'où vient la file (album, playlist…), affiché aux autres appareils
+        (ignoré par un serveur < 1.17)."""
         await self._put('/api/player/queue', {
             'track_ids': list(track_ids), 'current_index': current_index,
             'position_sec': position_sec, 'device_label': device_label,
+            'source_label': source_label,
         })
 
     async def update_queue_state(self, current_index: int,

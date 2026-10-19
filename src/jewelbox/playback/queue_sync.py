@@ -35,6 +35,7 @@ class QueueSync:
         self._planner = QueueSyncPlanner()
         self._pending_save = None   # dernière SyncAction 'save' en attente
         self._save_source = 0
+        self._source_name = None    # source de la file en cours (affichage)
 
     def start(self):
         self._playback.add_listener(self._on_playback_state)
@@ -44,6 +45,13 @@ class QueueSync:
         self._cancel_save()
 
     def _on_playback_state(self, state):
+        if state.source_name != self._source_name:
+            # Même pistes, autre source (reprise d'une file identique à celle
+            # restaurée au démarrage) : le serveur doit apprendre la nouvelle.
+            self._source_name = state.source_name
+            # File vidée : surtout pas, le DELETE ne partirait plus.
+            if state.queue_items:
+                self._planner.resend()
         action = self._planner.update(
             [item.track_id for item in state.queue_items],
             state.queue_index, state.position_seconds, state.is_playing,
@@ -87,15 +95,15 @@ class QueueSync:
         if client is None:
             return
         asyncio.get_event_loop_policy().get_event_loop().create_task(
-            self._call(client, action))
+            self._call(client, action, self._source_name))
 
     @staticmethod
-    async def _call(client, action):
+    async def _call(client, action, source_name):
         try:
             if action.kind == 'save':
                 await client.save_queue(
                     action.track_ids, action.current_index,
-                    action.position_sec, device_label())
+                    action.position_sec, device_label(), source_name)
             elif action.kind == 'state':
                 await client.update_queue_state(
                     action.current_index, action.position_sec)

@@ -288,12 +288,17 @@ def parse_queue_devices(data) -> tuple[QueueDevice, ...]:
     devices = []
     for row in _list(data, 'data'):
         row = _require_dict(row, 'queue-device')
+        current = row.get('current_track')
+        current = current if isinstance(current, dict) else {}
         devices.append(QueueDevice(
             device_id=_req_str(row, 'device_id', 'queue-device'),
             device_label=_opt_str(row, 'device_label'),
             current_index=_int(row, 'current_index', -1),
             updated_at=_opt_str(row, 'updated_at'),
             track_count=_int(row, 'track_count'),
+            source_label=_opt_str(row, 'source_label'),
+            current_title=_opt_str(current, 'title'),
+            current_artist=_opt_str(current, 'artist_name'),
         ))
     return tuple(devices)
 
@@ -310,6 +315,7 @@ def parse_device_queue(data) -> DeviceQueue:
                       and not isinstance(position, bool) else 0.0),
         updated_at=_opt_str(data, 'updated_at'),
         tracks=tuple(parse_queue_track(t) for t in _list(data, 'tracks')),
+        source_label=_opt_str(data, 'source_label'),
     )
 
 

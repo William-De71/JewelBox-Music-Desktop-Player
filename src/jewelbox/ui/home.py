@@ -17,11 +17,14 @@ Home chargé par api.client et déléguer l'ouverture à la fenêtre / la lectur
 """
 
 import asyncio
+import time
 from gettext import gettext as _
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from jewelbox.api.client import ApiError
+from jewelbox.core.queue_sync import pick_resumable
+from jewelbox.ui.resume_dialog import device_summary, resume_device
 from jewelbox.ui.smart_specs import smart_spec
 
 _RECENT_COVER_SIZE = 56
@@ -195,6 +198,7 @@ class HomePage(Gtk.Stack):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                           margin_start=18, margin_end=18,
                           margin_top=18, margin_bottom=18)
+        content.append(self._build_resume_card())
         content.append(self._recent_group)
         content.append(self._latest_group)
         content.append(self._suggestions_group)
@@ -206,6 +210,94 @@ class HomePage(Gtk.Stack):
             'content')
         # Pas de reload() ici : la fenêtre le déclenche une fois toute l'UI
         # construite (comme la Bibliothèque).
+
+    def _build_resume_card(self):
+        """Carte « Reprendre depuis… » (parité ResumeCard Android) : la file
+        la plus récente laissée par un autre appareil dans les dernières 24 h,
+        reprise en un clic. Masquée s'il n'y en a pas ; « Ignorer » l'écarte
+        jusqu'à ce que cet appareil rejoue quelque chose."""
+        self._resume_device = None
+        self._resume_dismissed = set()
+        self._resume_generation = 0
+        self._resume_row = Adw.ActionRow(use_markup=False)
+        self._resume_icon = Gtk.Image(icon_name='phone-symbolic')
+        self._resume_row.add_prefix(self._resume_icon)
+        self._resume_button = Gtk.Button(
+            label=_('Reprendre'), valign=Gtk.Align.CENTER,
+            css_classes=['pill', 'suggested-action'])
+        self._resume_button.connect('clicked', self._on_resume_clicked)
+        dismiss = Gtk.Button(
+            icon_name='window-close-symbolic', valign=Gtk.Align.CENTER,
+            css_classes=['flat'], tooltip_text=_('Ignorer'))
+        dismiss.connect('clicked', self._on_resume_dismissed)
+        self._resume_row.add_suffix(self._resume_button)
+        self._resume_row.add_suffix(dismiss)
+        self._resume_card = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.NONE,
+            css_classes=['boxed-list'], visible=False)
+        self._resume_card.append(self._resume_row)
+        return self._resume_card
+
+    def refresh_resume(self):
+        """Ne recharge que la carte de reprise (fenêtre réaffichée : on a pu
+        écouter sur le téléphone entre-temps)."""
+        client = self._app.get_client()
+        if client is None:
+            return
+        task = self._load_resume(client)
+        asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+    async def _load_resume(self, client):
+        self._resume_generation += 1
+        generation = self._resume_generation
+        try:
+            devices = await client.queue_devices()
+        except ApiError:
+            # Serveur sans file par appareil (< 1.15) ou injoignable.
+            devices = ()
+        if generation != self._resume_generation:
+            return
+        device = pick_resumable(devices, time.time(), self._resume_dismissed)
+        self._resume_device = device
+        self._resume_card.set_visible(device is not None)
+        if device is None:
+            return
+        title, subtitle = device_summary(device)
+        self._resume_row.set_title(title)
+        self._resume_row.set_subtitle(
+            _('Reprendre depuis un autre appareil') + '\n' + subtitle)
+        label = (device.device_label or '').lower()
+        self._resume_icon.set_from_icon_name(
+            'phone-symbolic' if 'android' in label else 'computer-symbolic')
+
+    def _dismiss_resume(self, device):
+        self._resume_dismissed.add((device.device_id, device.updated_at))
+        self._resume_device = None
+        self._resume_card.set_visible(False)
+
+    def _on_resume_dismissed(self, _button):
+        if self._resume_device is not None:
+            self._dismiss_resume(self._resume_device)
+
+    def _on_resume_clicked(self, _button):
+        device = self._resume_device
+        if device is None:
+            return
+        self._resume_button.set_sensitive(False)
+        task = self._resume(device)
+        asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+    async def _resume(self, device):
+        outcome = await resume_device(self._app, device)
+        self._resume_button.set_sensitive(True)
+        # Reprise faite, ou rien de jouable : la carte n'a plus lieu d'être
+        # (sinon le rechargement de l'accueil qui suit la reprendrait).
+        if outcome != 'error':
+            self._dismiss_resume(device)
+        if outcome == 'empty':
+            root = self.get_root()
+            if hasattr(root, 'show_toast'):
+                root.show_toast(_('Aucune piste jouable dans cette file'))
 
     def _build_group(self, title, child):
         """Un titre de section au-dessus de son contenu (parité SectionHeader
@@ -297,6 +389,7 @@ class HomePage(Gtk.Stack):
         self._populate_latest(client, latest)
         self._populate_suggestions(home.suggestions)
         self.set_visible_child_name('content')
+        await self._load_resume(client)
 
     def _populate_recent(self, client, recent):
         self._recent_group.set_visible(bool(recent))
