@@ -18,7 +18,33 @@ from jewelbox.api.client import ApiError
 from jewelbox.core.queue_sync import resume_start
 
 
-def _ago(updated_at):
+async def resume_device(app, device):
+    """Charge la file de device et la lance à la même piste, à la même
+    position. Rend 'ok', 'empty' (rien de jouable) ou 'error' (serveur)."""
+    client = app.get_client()
+    playback = app.playback
+    if client is None or playback is None:
+        return 'error'
+    try:
+        queue = await client.device_queue(device.device_id)
+    except ApiError:
+        return 'error'
+    start = resume_start([t.has_file for t in queue.tracks],
+                         queue.current_index)
+    if start is None:
+        return 'empty'
+    index, same_track = start
+    # La source d'origine (« Mix dynamique », un album…) reste la plus
+    # parlante ; à défaut, d'où on a repris.
+    playback.play_queue_tracks(
+        queue.tracks, start_index=index,
+        source_name=queue.source_label or _('Repris de {device}').format(
+            device=device.device_label or _('un autre appareil')),
+        start_position=queue.position_sec if same_track else 0.0)
+    return 'ok'
+
+
+def time_ago(updated_at):
     """« il y a 5 min » à partir d'un horodatage SQLite (UTC, sans fuseau)."""
     if not updated_at:
         return ''
@@ -35,6 +61,28 @@ def _ago(updated_at):
     if minutes < 24 * 60:
         return _('il y a {n} h').format(n=minutes // 60)
     return _('il y a {n} j').format(n=minutes // (24 * 60))
+
+
+def device_summary(device):
+    """(titre, sous-titre) décrivant la file d'un autre appareil : ce qu'il
+    écoutait (piste — artiste, sinon sa source), puis d'où vient la file,
+    quel appareil, combien de pistes et quand."""
+    name = device.device_label or _('Appareil sans nom')
+    if device.current_title:
+        title = (f'{device.current_title} — {device.current_artist}'
+                 if device.current_artist else device.current_title)
+        details = [device.source_label] if device.source_label else []
+    else:
+        title = device.source_label or name
+        details = []
+    if title != name:
+        details.append(name)
+    details.append(_('{count} pistes').format(count=device.track_count)
+                   if device.track_count != 1 else _('1 piste'))
+    when = time_ago(device.updated_at)
+    if when:
+        details.append(when)
+    return title, ' · '.join(details)
 
 
 class ResumeDialog(Adw.Dialog):
@@ -82,14 +130,9 @@ class ResumeDialog(Adw.Dialog):
                 _('Aucun autre appareil n’a laissé de file d’attente.'))
             return
         for device in devices:
-            details = [_('{count} pistes').format(count=device.track_count)
-                       if device.track_count != 1 else _('1 piste')]
-            ago = _ago(device.updated_at)
-            if ago:
-                details.append(ago)
-            row = Adw.ActionRow(
-                title=device.device_label or _('Appareil sans nom'),
-                subtitle=' · '.join(details), activatable=True)
+            title, subtitle = device_summary(device)
+            row = Adw.ActionRow(title=title, subtitle=subtitle,
+                                use_markup=False, activatable=True)
             row.add_suffix(Gtk.Image(icon_name='media-playback-start-symbolic'))
             row._device = device
             self._list.append(row)
@@ -107,28 +150,14 @@ class ResumeDialog(Adw.Dialog):
             self._run(self._resume(device))
 
     async def _resume(self, device):
-        client = self._app.get_client()
-        playback = self._app.playback
-        if client is None or playback is None:
-            return
-        try:
-            queue = await client.device_queue(device.device_id)
-        except ApiError:
+        outcome = await resume_device(self._app, device)
+        if outcome == 'error':
             self._list.set_sensitive(True)
-            return
-        start = resume_start([t.has_file for t in queue.tracks],
-                             queue.current_index)
-        if start is None:
+        elif outcome == 'empty':
             self._show_message(_('Rien à reprendre'),
                                _('Aucune piste jouable dans cette file.'))
-            return
-        index, same_track = start
-        playback.play_queue_tracks(
-            queue.tracks, start_index=index,
-            source_name=_('Repris de {device}').format(
-                device=device.device_label or _('un autre appareil')),
-            start_position=queue.position_sec if same_track else 0.0)
-        self.close()
+        else:
+            self.close()
 
     def _run(self, coroutine):
         asyncio.get_event_loop_policy().get_event_loop().create_task(coroutine)

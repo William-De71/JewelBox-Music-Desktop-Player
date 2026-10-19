@@ -203,6 +203,11 @@ class QueueDevice:
     current_index: int = -1
     updated_at: str | None = None
     track_count: int = 0
+    # Ce que l'appareil écoutait (serveur >= 1.17, None avant) : la source de
+    # sa file (album, playlist, mix…) et sa piste courante.
+    source_label: str | None = None
+    current_title: str | None = None
+    current_artist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +221,7 @@ class DeviceQueue:
     position_sec: float = 0.0
     updated_at: str | None = None
     tracks: tuple[QueueTrack, ...] = ()
+    source_label: str | None = None
 
 
 @dataclass(frozen=True)

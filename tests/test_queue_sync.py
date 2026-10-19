@@ -13,6 +13,14 @@ def test_new_queue_is_saved_whole():
     assert action == SyncAction('save', (1, 2, 3), 1, 12.5)
 
 
+def test_resend_forces_a_full_save_of_the_same_tracks():
+    planner = QueueSyncPlanner()
+    planner.update([1, 2], 0, 0, False, now=0)
+    planner.resend()
+    assert planner.update([1, 2], 1, 3, True, now=1) == SyncAction(
+        'save', (1, 2), 1, 3)
+
+
 def test_nothing_new_sends_nothing():
     planner = QueueSyncPlanner()
     planner.update([1, 2], 0, 0, True, now=0)
@@ -97,3 +105,59 @@ def test_resume_unknown_index_starts_at_the_top():
 def test_resume_nothing_playable():
     assert resume_start([False, False], 0) is None
     assert resume_start([], 0) is None
+
+
+# ── Proposition de reprise à l'accueil ───────────────────────────────────────
+
+from jewelbox.api.models import QueueDevice  # noqa: E402
+from jewelbox.core.queue_sync import (  # noqa: E402
+    RESUME_WINDOW, parse_server_timestamp, pick_resumable)
+
+_NOON = parse_server_timestamp('2026-10-19 12:00:00')
+
+
+def _device(device_id, updated_at, track_count=3):
+    return QueueDevice(device_id=device_id, updated_at=updated_at,
+                       track_count=track_count)
+
+
+def test_parse_server_timestamp_is_utc():
+    assert parse_server_timestamp('1970-01-01 00:01:00') == 60
+    assert parse_server_timestamp(' 1970-01-01 00:00:05 ') == 5
+
+
+def test_parse_server_timestamp_rejects_missing_or_garbage():
+    assert parse_server_timestamp(None) is None
+    assert parse_server_timestamp('') is None
+    assert parse_server_timestamp('hier soir') is None
+
+
+def test_pick_resumable_takes_most_recent():
+    older = _device('a', '2026-10-19 10:00:00')
+    newer = _device('b', '2026-10-19 11:30:00')
+    assert pick_resumable([older, newer], _NOON) is newer
+    assert pick_resumable([newer, older], _NOON) is newer
+
+
+def test_pick_resumable_skips_empty_stale_unknown_and_future():
+    devices = [
+        _device('empty', '2026-10-19 11:59:00', track_count=0),
+        _device('stale', '2026-10-18 11:59:59'),
+        _device('unknown', None),
+        _device('future', '2026-10-19 12:00:01'),
+    ]
+    assert pick_resumable(devices, _NOON) is None
+
+
+def test_pick_resumable_window_is_inclusive():
+    edge = _device('edge', '2026-10-18 12:00:00')
+    assert pick_resumable([edge], _NOON) is edge
+    assert _NOON - parse_server_timestamp(edge.updated_at) == RESUME_WINDOW
+
+
+def test_dismissed_device_returns_once_it_plays_again():
+    first = _device('phone', '2026-10-19 11:00:00')
+    dismissed = {('phone', '2026-10-19 11:00:00')}
+    assert pick_resumable([first], _NOON, dismissed) is None
+    again = _device('phone', '2026-10-19 11:45:00')
+    assert pick_resumable([again], _NOON, dismissed) is again

@@ -14,8 +14,11 @@ jouait ici. Protocole de la PWA (PlayerContext.jsx) :
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 PROGRESS_INTERVAL = 30.0
+# Ancienneté maximale d'une file d'un autre appareil proposée à l'accueil.
+RESUME_WINDOW = 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,11 @@ class QueueSyncPlanner:
         self._index = -1
         self._playing = False
         self._last_push = 0.0
+
+    def resend(self):
+        """La prochaine mise à jour renverra la file entière, même si ses
+        pistes n'ont pas changé (sa source, elle, a changé)."""
+        self._track_ids = ()
 
     def update(self, track_ids, current_index, position_sec, playing,
                now) -> SyncAction | None:
@@ -84,3 +92,38 @@ def resume_start(playable, current_index):
     if playable[current_index]:
         return before, True
     return min(before, total - 1), False
+
+
+def parse_server_timestamp(value):
+    """Horodatage SQLite datetime('now') (UTC, sans fuseau) → secondes
+    epoch, ou None s'il est absent ou illisible."""
+    if not value:
+        return None
+    try:
+        moment = datetime.strptime(value.strip(), '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=timezone.utc).timestamp()
+
+
+def pick_resumable(devices, now, dismissed=()):
+    """L'autre appareil à proposer à l'accueil : le plus récemment mis à
+    jour qui a encore des pistes, s'il a servi dans les RESUME_WINDOW
+    dernières secondes (la file du mois dernier n'intéresse personne).
+    Même règle que pickResumable côté Android.
+
+    devices : des QueueDevice ; now : secondes epoch ; dismissed : couples
+    (device_id, updated_at) écartés par l'utilisateur — un appareil écarté
+    revient dès qu'il a rejoué quelque chose (updated_at change)."""
+    best, best_at = None, None
+    for device in devices:
+        if device.track_count <= 0:
+            continue
+        if (device.device_id, device.updated_at) in dismissed:
+            continue
+        at = parse_server_timestamp(device.updated_at)
+        if at is None or not 0 <= now - at <= RESUME_WINDOW:
+            continue
+        if best_at is None or at > best_at:
+            best, best_at = device, at
+    return best
