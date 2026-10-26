@@ -31,7 +31,7 @@ _RECENT_COVER_SIZE = 56
 _SUGGESTION_COVER_SIZE = 160
 _LATEST_COVER_SIZE = 120
 # Nombre de derniers albums enregistrés affichés en tête des suggestions.
-_LATEST_COUNT = 5
+_LATEST_COUNT = 10
 # Hauteur d'une barre de défilement horizontale non superposée (mesurée sur le
 # thème Adwaita : 24 px). Réservée sous la rangée « Derniers ajouts », voir le
 # commentaire de son ScrolledWindow.
