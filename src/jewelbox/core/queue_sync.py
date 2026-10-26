@@ -106,7 +106,7 @@ def parse_server_timestamp(value):
     return moment.replace(tzinfo=timezone.utc).timestamp()
 
 
-def pick_resumable(devices, now, dismissed=()):
+def pick_resumable(devices, now, dismissed=(), own_updated_at=None):
     """L'autre appareil à proposer à l'accueil : le plus récemment mis à
     jour qui a encore des pistes, s'il a servi dans les RESUME_WINDOW
     dernières secondes (la file du mois dernier n'intéresse personne).
@@ -114,7 +114,12 @@ def pick_resumable(devices, now, dismissed=()):
 
     devices : des QueueDevice ; now : secondes epoch ; dismissed : couples
     (device_id, updated_at) écartés par l'utilisateur — un appareil écarté
-    revient dès qu'il a rejoué quelque chose (updated_at change)."""
+    revient dès qu'il a rejoué quelque chose (updated_at change) ;
+    own_updated_at : le updated_at de la file de CET appareil. Un appareil
+    qui n'a rien joué depuis que celui-ci a servi n'est plus proposé : sa
+    file a déjà été reprise ici (ou écoutée ici après lui), et une reprise
+    ne doit pas revenir à chaque morceau ni après un redémarrage."""
+    own_at = parse_server_timestamp(own_updated_at)
     best, best_at = None, None
     for device in devices:
         if device.track_count <= 0:
@@ -123,6 +128,8 @@ def pick_resumable(devices, now, dismissed=()):
             continue
         at = parse_server_timestamp(device.updated_at)
         if at is None or not 0 <= now - at <= RESUME_WINDOW:
+            continue
+        if own_at is not None and at <= own_at:
             continue
         if best_at is None or at > best_at:
             best, best_at = device, at

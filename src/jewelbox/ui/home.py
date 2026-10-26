@@ -255,9 +255,16 @@ class HomePage(Gtk.Stack):
         except ApiError:
             # Serveur sans file par appareil (< 1.15) ou injoignable.
             devices = ()
+        own_updated_at = None
+        if devices:
+            try:
+                own_updated_at = (await client.own_queue()).updated_at
+            except ApiError:
+                pass
         if generation != self._resume_generation:
             return
-        device = pick_resumable(devices, time.time(), self._resume_dismissed)
+        device = pick_resumable(devices, time.time(), self._resume_dismissed,
+                                own_updated_at)
         self._resume_device = device
         self._resume_card.set_visible(device is not None)
         if device is None:

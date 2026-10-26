@@ -164,6 +164,14 @@ class Queue:
         self._position = self._order.index(index)
         return self.state()
 
+    def played_before(self) -> tuple[int, ...]:
+        """Les pistes avant la courante dans l'ordre de LECTURE (celles que
+        « précédent » retrouverait), en track_id."""
+        if not 0 <= self._position < len(self._order):
+            return ()
+        return tuple(self._items[i].track_id
+                     for i in self._order[:self._position])
+
     def peek_next(self) -> QueueItem | None:
         """La piste qui suivrait sur une fin naturelle, SANS avancer la file.
 

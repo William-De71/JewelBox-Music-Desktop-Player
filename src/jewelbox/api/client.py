@@ -305,6 +305,10 @@ class JewelBoxClient:
     async def clear_queue(self) -> None:
         await self._delete('/api/player/queue')
 
+    async def own_queue(self):
+        """La file de CET appareil côté serveur."""
+        return parsing.parse_device_queue(await self._get('/api/player/queue'))
+
     async def queue_devices(self):
         """Les files laissées par les AUTRES appareils."""
         return parsing.parse_queue_devices(

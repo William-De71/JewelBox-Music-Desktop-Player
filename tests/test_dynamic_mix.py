@@ -29,3 +29,12 @@ def test_empty_server_list_removes_everything():
 
 def test_empty_local_queue_appends_everything():
     assert plan([], [1, 2]) == MixSyncPlan(append_ids=(1, 2))
+
+
+def test_trim_waits_for_the_fifth_track():
+    from jewelbox.core.dynamic_mix import KEEP_BEHIND, trim_ids
+    assert KEEP_BEHIND == 4
+    assert trim_ids(()) == ()
+    assert trim_ids((1, 2, 3)) == ()
+    assert trim_ids([1, 2, 3, 4]) == (1, 2, 3, 4)
+    assert trim_ids((7, 1, 2, 3, 4)) == (7, 1, 2, 3, 4)

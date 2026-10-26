@@ -13,7 +13,8 @@ côté Android — l'utilisateur appuie sur lecture pour repartir).
 
 Mix dynamique : une piste du mix écoutée jusqu'au bout est signalée au
 serveur, qui la retire et recomplète la liste ; la file suit (parité avec
-PlayerConnection.onTrackEnded côté Android, voir core.dynamic_mix).
+PlayerConnection.onTrackEnded côté Android, voir core.dynamic_mix). Les
+pistes passées à la main le sont aussi, une fois la 5e atteinte.
 """
 
 import asyncio
@@ -110,6 +111,7 @@ class PlaybackSession:
         # Abonnés à la liste du mix dynamique (la fiche ouverte) : chaque
         # rotation leur transmet la liste fraîche renvoyée par le serveur.
         self._mix_listeners: list = []
+        self._mix_trimming = False
         self.on_state_changed = None
         self._last_error: str | None = None
         # Posé par _on_about_to_finish quand playbin3 a déjà reçu l'URI
@@ -530,6 +532,7 @@ class PlaybackSession:
             self._run(client.now_playing(current.track_id))
         self._publish(state)
         self._save_state()
+        self._trim_mix()
 
     # ── Évènements du moteur ─────────────────────────────────────────────────
 
@@ -638,6 +641,35 @@ class PlaybackSession:
         # Une autre file a pu prendre le relais pendant la requête.
         if self._is_dynamic_mix():
             self.sync_dynamic_mix(result.tracks, restart=exhausted)
+
+    def _trim_mix(self):
+        """Avancer à la main dans le mix : arrivé assez loin, les pistes
+        passées sont consommées à leur tour (voir dynamic_mix.trim_ids)."""
+        if self._mix_trimming or not self._is_dynamic_mix():
+            return
+        track_ids = dynamic_mix.trim_ids(self._queue.played_before())
+        client = self._get_client()
+        if not track_ids or client is None:
+            return
+        self._mix_trimming = True
+        self._run(self._consume_mix_tracks(client, track_ids))
+
+    async def _consume_mix_tracks(self, client, track_ids):
+        result = None
+        try:
+            for track_id in track_ids:
+                try:
+                    result = await client.dynamic_mix_played(track_id)
+                except ApiError:
+                    break
+        finally:
+            self._mix_trimming = False
+        if result is None:
+            return
+        for listener in list(self._mix_listeners):
+            listener(result.tracks)
+        if self._is_dynamic_mix():
+            self.sync_dynamic_mix(result.tracks)
 
     def sync_dynamic_mix(self, tracks, restart: bool = False,
                          yank_current: bool = False):

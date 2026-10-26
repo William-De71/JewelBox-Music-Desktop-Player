@@ -12,6 +12,10 @@ from dataclasses import dataclass
 # Clé de la liste intelligente « Mix dynamique » côté serveur.
 DYNAMIC_MIX_KEY = 'dynamic_mix'
 
+# Pistes gardées derrière la piste en cours (« précédent » y revient) avant
+# d'être consommées. Parité MIX_KEEP_BEHIND de la PWA et d'Android.
+KEEP_BEHIND = 4
+
 
 @dataclass(frozen=True)
 class MixSyncPlan:
@@ -29,3 +33,16 @@ def plan(current_ids, server_ids) -> MixSyncPlan:
         remove_ids=tuple(i for i in current_ids if i not in server),
         append_ids=tuple(i for i in server_ids if i not in local),
     )
+
+
+def trim_ids(played_before) -> tuple[int, ...]:
+    """Pistes à consommer quand on avance à la main dans le mix.
+
+    Une piste passée n'est pas consommée (seule une écoute complète l'est) :
+    sans ça, sauter de piste en piste épuiserait la file sans que le serveur
+    la recomplète. Arrivé à la piste KEEP_BEHIND + 1, celles d'avant sont
+    donc consommées : la piste en cours repasse en tête et le bas de la liste
+    se recomplète. played_before : les pistes avant la courante, dans
+    l'ordre de lecture."""
+    played_before = tuple(played_before)
+    return played_before if len(played_before) >= KEEP_BEHIND else ()

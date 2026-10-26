@@ -161,3 +161,16 @@ def test_dismissed_device_returns_once_it_plays_again():
     assert pick_resumable([first], _NOON, dismissed) is None
     again = _device('phone', '2026-10-19 11:45:00')
     assert pick_resumable([again], _NOON, dismissed) is again
+
+
+def test_pick_resumable_skips_what_this_device_played_since():
+    phone = _device('phone', '2026-10-19 11:00:00')
+    # Resumed here at 11:05 (and listened since): no more offer, even
+    # after a restart of the app.
+    assert pick_resumable([phone], _NOON, own_updated_at='2026-10-19 11:05:00') is None
+    assert pick_resumable([phone], _NOON, own_updated_at='2026-10-19 11:00:00') is None
+    # The phone played again afterwards: offered again.
+    assert pick_resumable([phone], _NOON, own_updated_at='2026-10-19 10:30:00') is phone
+    # No queue here, or an unreadable date: the rule does not apply.
+    assert pick_resumable([phone], _NOON, own_updated_at=None) is phone
+    assert pick_resumable([phone], _NOON, own_updated_at='?') is phone

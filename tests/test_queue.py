@@ -731,3 +731,30 @@ def test_remove_at_out_of_range_is_a_no_op():
     queue = Queue()
     queue.load(make_items(2))
     assert ids(queue.remove_at(5)) == [1, 2]
+
+
+# ── pistes passées (mix dynamique) ───────────────────────────────────────────
+
+def test_played_before_follows_the_play_order():
+    queue = Queue()
+    assert queue.played_before() == ()
+    queue.load(make_items(5))
+    assert queue.played_before() == ()
+    queue.next()
+    queue.next()
+    assert queue.played_before() == (1, 2)
+    queue.set_shuffle(True)
+    order = []
+    while True:
+        order.append(queue.state().current.track_id)
+        if not queue.has_next():
+            break
+        queue.next()
+    assert queue.played_before() == tuple(order[:-1])
+
+
+def test_played_before_is_empty_past_the_end():
+    queue = Queue()
+    queue.load(make_items(2), start_index=1)
+    queue.track_ended()
+    assert queue.played_before() == ()
