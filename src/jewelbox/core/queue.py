@@ -330,6 +330,10 @@ class Queue:
         self._repeat = self._repeat.next()
         return self.state()
 
+    def set_repeat(self, mode: 'RepeatMode') -> QueueState:
+        self._repeat = mode
+        return self.state()
+
     def _rebuild_order(self, keep_current: bool):
         current_item_index = (
             self._order[self._position]

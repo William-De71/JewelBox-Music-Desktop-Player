@@ -149,6 +149,12 @@ class Player:
     def get_volume(self) -> float:
         return self._playbin.get_property('volume')
 
+    def set_mute(self, muted: bool):
+        self._playbin.set_property('mute', bool(muted))
+
+    def get_mute(self) -> bool:
+        return bool(self._playbin.get_property('mute'))
+
     @property
     def is_playing(self) -> bool:
         return self._is_playing

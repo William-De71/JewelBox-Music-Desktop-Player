@@ -24,7 +24,7 @@ from gettext import gettext as _
 from jewelbox.api.client import ApiError
 from jewelbox.core import dynamic_mix
 from jewelbox.core.dynamic_mix import DYNAMIC_MIX_KEY
-from jewelbox.core.queue import Queue, QueueItem
+from jewelbox.core.queue import Queue, QueueItem, RepeatMode
 from jewelbox.core.scrobble import ScrobbleTracker
 
 
@@ -60,6 +60,7 @@ class PlaybackUiState:
     position_seconds: float = 0.0
     duration_seconds: float = 0.0
     volume: float = 1.0
+    muted: bool = False
     error: str | None = None
     # Minuterie de sommeil : None (inactive), 'timer' (arrêt à une heure
     # donnée, sleep_remaining_seconds restantes) ou 'track' (arrêt à la fin
@@ -440,6 +441,10 @@ class PlaybackSession:
         self._player.set_volume(volume)
         self._publish()
 
+    def set_muted(self, muted: bool):
+        self._player.set_mute(muted)
+        self._publish()
+
     def close(self):
         """Arrête la lecture et vide la file : le mini-lecteur se masque
         (parité avec le bouton fermer du mini-lecteur web). Fermer le lecteur
@@ -460,6 +465,24 @@ class PlaybackSession:
 
     def cycle_repeat(self):
         self._publish(self._queue.cycle_repeat())
+
+    # Réglages absolus, pour le contrôle à distance (un contrôleur demande
+    # « aléatoire activé », pas « bascule »).
+
+    def set_shuffle(self, enabled: bool):
+        if enabled != self._queue.state().shuffle:
+            self.toggle_shuffle()
+
+    def set_repeat(self, mode: str):
+        self._publish(self._queue.set_repeat(RepeatMode(mode)))
+
+    def play(self):
+        if self.has_item and not self._player.is_playing:
+            self.toggle_play_pause()
+
+    def pause(self):
+        if self._player.is_playing:
+            self.toggle_play_pause()
 
     def toggle_favorite(self):
         """Bascule optimiste : la file (et donc l'UI) reflète tout de
@@ -851,6 +874,7 @@ class PlaybackSession:
             duration_seconds=(duration if duration is not None
                               else self._player.duration()),
             volume=self._player.get_volume(),
+            muted=self._player.get_mute(),
             error=self._last_error,
             sleep_mode=self._sleep_mode,
             sleep_remaining_seconds=(

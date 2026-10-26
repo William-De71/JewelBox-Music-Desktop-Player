@@ -33,6 +33,11 @@
       <summary>Lecture en arrière-plan</summary>
       <description>Fermer la fenêtre pendant une lecture la masque au lieu de quitter : la musique continue, pilotable depuis le menu système</description>
     </key>
+    <key name="remote-control" type="b">
+      <default>true</default>
+      <summary>Autoriser le contrôle à distance</summary>
+      <description>Un autre client du serveur (Gladys…) peut piloter ce lecteur : lecture, pause, piste suivante, volume, lancer un album</description>
+    </key>
     <key name="notify-track-change" type="b">
       <default>true</default>
       <summary>Notifier le changement de piste</summary>

@@ -27,6 +27,7 @@ class _MemorySettings:
         'server-url': '', 'server-id': '', 'device-id': '',
         'sort-order': 'artist',
         'background-playback': True, 'notify-track-change': True,
+        'remote-control': True,
         'smart-ranking-size': 100, 'replaygain': 'album',
     }
 
@@ -50,6 +51,14 @@ class _MemorySettings:
 
     def set_int(self, key, value):
         self._values[key] = int(value)
+
+    # Pas de signal changed:: en mémoire : les abonnés lisent la valeur à
+    # chaque usage.
+    def connect(self, _signal, _callback):
+        return 0
+
+    def disconnect(self, _handler):
+        pass
 
 
 def _load_settings():
@@ -76,6 +85,7 @@ class JewelboxApplication(Adw.Application):
         self._mpris = None
         self._notifier = None
         self._queue_sync = None
+        self._remote_control = None
         # Fenêtre masquée (lecture en arrière-plan) : minuterie de sortie
         # quand plus rien ne joue, et demande au portail faite une seule fois.
         self._idle_quit_source = 0
@@ -130,6 +140,10 @@ class JewelboxApplication(Adw.Application):
         from jewelbox.playback.queue_sync import QueueSync
         self._queue_sync = QueueSync(self, self.playback)
         self._queue_sync.start()
+        # Pilotage par un autre client (Gladys…), si le réglage l'autorise.
+        from jewelbox.playback.remote_control import RemoteControl
+        self._remote_control = RemoteControl(self, self.playback)
+        self._remote_control.start()
         self.apply_replaygain()
         self.playback.add_listener(self._on_playback_state)
 
@@ -157,6 +171,8 @@ class JewelboxApplication(Adw.Application):
             self._notifier.stop()
         if self._queue_sync is not None:
             self._queue_sync.stop()
+        if self._remote_control is not None:
+            self._remote_control.stop()
         self._cancel_idle_quit()
         Adw.Application.do_shutdown(self)
 

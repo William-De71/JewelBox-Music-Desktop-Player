@@ -278,6 +278,30 @@ class JewelBoxClient:
             'current_index': current_index, 'position_sec': position_sec,
         })
 
+    async def report_live_state(self, body: dict) -> None:
+        """État en direct (lecture/pause, piste, volume, modes) pour le
+        contrôle à distance. Même route que la progression : un serveur
+        < 1.18 garde la position et ignore le reste."""
+        await self._patch('/api/player/queue/state', body)
+
+    async def track(self, track_id: int):
+        """Une piste au format QueueTrack (serveur >= 1.18)."""
+        return parsing.parse_queue_track(
+            await self._get(f'/api/player/tracks/{track_id}'))
+
+    def remote_events_message(self, label: str, capabilities):
+        """Requête du flux d'ordres à distance (text/event-stream), ouverte
+        et lue par playback/remote_control.py."""
+        url = server_url.api_url(self.base_url, '/api/player/remote/events', {
+            'label': label, 'capabilities': ','.join(capabilities)})
+        message = Soup.Message.new('GET', url)
+        if message is None:
+            raise ApiError(f'URL invalide : {url}')
+        headers = message.get_request_headers()
+        headers.append('X-Device-Id', self._device_id)
+        headers.append('Accept', 'text/event-stream')
+        return message
+
     async def clear_queue(self) -> None:
         await self._delete('/api/player/queue')
 

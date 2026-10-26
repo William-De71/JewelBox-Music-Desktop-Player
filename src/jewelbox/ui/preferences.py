@@ -92,6 +92,15 @@ class PreferencesDialog(Adw.PreferencesDialog):
                            'background-playback')
         group.add(background)
 
+        remote_control = Adw.SwitchRow(
+            title=_('Autoriser le contrôle à distance'),
+            subtitle=_('Un autre client du serveur, comme Gladys, peut '
+                       'piloter ce lecteur.'),
+            active=self._settings.get_boolean('remote-control'))
+        remote_control.connect('notify::active', self._on_switch_changed,
+                               'remote-control')
+        group.add(remote_control)
+
         notify = Adw.SwitchRow(
             title=_('Notifier le changement de piste'),
             subtitle=_('Quand la fenêtre n’est pas au premier plan.'),
