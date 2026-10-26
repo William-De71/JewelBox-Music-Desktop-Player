@@ -1,5 +1,5 @@
 project('jewelbox',
-  version: '0.11.0',
+  version: '0.12.0',
   meson_version: '>= 1.0.0',
   license: 'MIT',
 )
