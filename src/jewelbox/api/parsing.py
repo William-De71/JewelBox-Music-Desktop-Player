@@ -242,6 +242,12 @@ def parse_home(data) -> Home:
     )
 
 
+def parse_suggestions(data) -> tuple:
+    """POST /api/player/home/suggestions (serveur >= 1.21)."""
+    data = _require_dict(data, 'suggestions')
+    return tuple(parse_album(album) for album in _list(data, 'suggestions'))
+
+
 def _parse_home_recent_item(data) -> HomeRecentItem:
     data = _require_dict(data, 'home-recent')
     album = data.get('album')

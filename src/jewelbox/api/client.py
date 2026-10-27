@@ -141,6 +141,12 @@ class JewelBoxClient:
         query = None if ranking_size is None else {'smart_limit': ranking_size}
         return parsing.parse_home(await self._get('/api/player/home', query))
 
+    async def refresh_suggestions(self):
+        """Nouveau tirage des suggestions du jour (serveur >= 1.21, 404
+        avant) ; le serveur garde ce tirage jusqu'au lendemain."""
+        data = await self._post('/api/player/home/suggestions')
+        return parsing.parse_suggestions(data)
+
     async def search(self, query: str):
         """Recherche bibliothèque (serveur >= 1.7) ; q >= 2 caractères."""
         data = await self._get('/api/player/search', {'q': query})

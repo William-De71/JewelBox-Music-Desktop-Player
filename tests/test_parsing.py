@@ -310,6 +310,14 @@ def test_home_empty():
     assert home.suggestions == ()
 
 
+def test_suggestions():
+    albums = parsing.parse_suggestions({'suggestions': [
+        {'id': 3, 'title': 'Kid A', 'artist': {'id': 1, 'name': 'Radiohead'}},
+    ]})
+    assert [album.id for album in albums] == [3]
+    assert parsing.parse_suggestions({}) == ()
+
+
 # ── pagination ────────────────────────────────────────────────────────────────
 
 def test_albums_page_full():

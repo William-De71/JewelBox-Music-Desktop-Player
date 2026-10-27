@@ -169,8 +169,17 @@ class HomePage(Gtk.Stack):
         self._suggestions_clamp = _SuggestionsClamp(
             self._suggestions_grid, self._schedule_fit_suggestions)
 
+        # Nouveau tirage à la demande (le serveur le garde pour la journée).
+        self._redraw_button = Gtk.Button(
+            icon_name='view-refresh-symbolic',
+            tooltip_text=_('Nouvelles suggestions'),
+            valign=Gtk.Align.CENTER,
+            css_classes=['flat'])
+        self._redraw_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], [_('Nouvelles suggestions')])
+        self._redraw_button.connect('clicked', self._on_redraw_clicked)
         self._suggestions_group = self._build_group(
-            _('Suggestions'), self._suggestions_clamp)
+            _('Suggestions'), self._suggestions_clamp, self._redraw_button)
 
         # Ligne « Derniers ajouts » : les albums les plus récemment enregistrés
         # sur le serveur, en rangée horizontale de pochettes carrées. Elle est
@@ -306,13 +315,19 @@ class HomePage(Gtk.Stack):
             if hasattr(root, 'show_toast'):
                 root.show_toast(_('Aucune piste jouable dans cette file'))
 
-    def _build_group(self, title, child):
+    def _build_group(self, title, child, action=None):
         """Un titre de section au-dessus de son contenu (parité SectionHeader
-        Android)."""
-        header = Gtk.Label(label=title, xalign=0,
+        Android), avec un éventuel bouton à droite du titre."""
+        header = Gtk.Label(label=title, xalign=0, hexpand=True,
                            css_classes=['title-4'])
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.append(header)
+        if action is None:
+            box.append(header)
+        else:
+            row = Gtk.Box(spacing=6)
+            row.append(header)
+            row.append(action)
+            box.append(row)
         box.append(child)
         return box
 
@@ -411,6 +426,29 @@ class HomePage(Gtk.Stack):
             self._latest_box.remove(child)
         for album in latest:
             self._latest_box.append(self._build_latest_tile(client, album))
+
+    def _on_redraw_clicked(self, _button):
+        client = self._app.get_client()
+        if client is None:
+            return
+        self._redraw_button.set_sensitive(False)
+        asyncio.get_event_loop_policy().get_event_loop().create_task(
+            self._redraw_suggestions(client))
+
+    async def _redraw_suggestions(self, client):
+        try:
+            suggestions = await client.refresh_suggestions()
+        except ApiError as error:
+            root = self.get_root()
+            if hasattr(root, 'show_toast'):
+                root.show_toast(
+                    _('Le serveur JewelBox 1.21 ou plus récent est nécessaire')
+                    if error.status == 404
+                    else _('Impossible de renouveler les suggestions'))
+            return
+        finally:
+            self._redraw_button.set_sensitive(True)
+        self._populate_suggestions(suggestions)
 
     def _populate_suggestions(self, suggestions):
         self._suggestions_group.set_visible(bool(suggestions))
