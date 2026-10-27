@@ -16,6 +16,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 from jewelbox.api.client import ApiError, JewelBoxClient
 from jewelbox.core import server_url
+from jewelbox.core.transition_fade import TRANSITION_FADE_CHOICES
 
 
 class PreferencesDialog(Adw.PreferencesDialog):
@@ -137,6 +138,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
         replaygain.connect('notify::selected', self._on_replaygain_changed)
         group.add(replaygain)
 
+        fade = Adw.ComboRow(
+            title=_('Fondu entre les morceaux'),
+            subtitle=_('Le son baisse à la fin d’un morceau et remonte au début '
+                       'du suivant. Jamais entre deux pistes qui se suivent sur '
+                       'un même album.'),
+            model=Gtk.StringList.new([
+                _('Désactivé') if seconds == 0 else _('{seconds} secondes').format(seconds=seconds)
+                for seconds in TRANSITION_FADE_CHOICES]))
+        current_fade = self._settings.get_int('transition-fade')
+        fade.set_selected(TRANSITION_FADE_CHOICES.index(current_fade)
+                          if current_fade in TRANSITION_FADE_CHOICES else 0)
+        fade.connect('notify::selected', self._on_transition_fade_changed)
+        group.add(fade)
+
     @staticmethod
     def _replaygain_choices():
         # Construit à l'appel (et non à l'import) : gettext doit voir la
@@ -151,6 +166,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
             app = Gio.Application.get_default()
             if app is not None and hasattr(app, 'apply_replaygain'):
                 app.apply_replaygain()
+
+    def _on_transition_fade_changed(self, row, _pspec):
+        position = row.get_selected()
+        if 0 <= position < len(TRANSITION_FADE_CHOICES):
+            self._settings.set_int('transition-fade', TRANSITION_FADE_CHOICES[position])
+            app = Gio.Application.get_default()
+            if app is not None and hasattr(app, 'apply_transition_fade'):
+                app.apply_transition_fade()
 
     def _on_switch_changed(self, row, _pspec, key):
         self._settings.set_boolean(key, row.get_active())

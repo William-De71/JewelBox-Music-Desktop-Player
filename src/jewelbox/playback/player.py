@@ -58,6 +58,7 @@ class Player:
         # reçoit leur produit, get_volume() rend le volume choisi.
         self._volume = 1.0
         self._fade = 1.0
+        self._transition = 1.0
         self._poll_source_id: int | None = None
 
         self.on_position = None
@@ -159,8 +160,15 @@ class Player:
         self._fade = max(0.0, min(1.0, factor))
         self._apply_volume()
 
+    def set_transition(self, factor: float):
+        """Fondu entre les morceaux : multiplie lui aussi le volume choisi."""
+        factor = max(0.0, min(1.0, factor))
+        if factor != self._transition:
+            self._transition = factor
+            self._apply_volume()
+
     def _apply_volume(self):
-        self._playbin.set_property('volume', self._volume * self._fade)
+        self._playbin.set_property('volume', self._volume * self._fade * self._transition)
 
     def set_mute(self, muted: bool):
         self._playbin.set_property('mute', bool(muted))

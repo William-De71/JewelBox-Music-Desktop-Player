@@ -284,6 +284,11 @@ class JewelBoxClient:
         < 1.18 garde la position et ignore le reste."""
         await self._patch('/api/player/queue/state', body)
 
+    async def lyrics(self, track_id: int):
+        """Paroles d'une piste (serveur >= 1.20) : la réponse brute, lue par
+        core.lyrics.parse_lyrics."""
+        return await self._get(f'/api/player/tracks/{track_id}/lyrics')
+
     async def track(self, track_id: int):
         """Une piste au format QueueTrack (serveur >= 1.18)."""
         return parsing.parse_queue_track(

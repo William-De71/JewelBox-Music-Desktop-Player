@@ -28,7 +28,7 @@ class _MemorySettings:
         'sort-order': 'artist',
         'background-playback': True, 'notify-track-change': True,
         'remote-control': True,
-        'smart-ranking-size': 100, 'replaygain': 'album',
+        'smart-ranking-size': 100, 'replaygain': 'album', 'transition-fade': 0,
     }
 
     def __init__(self):
@@ -145,6 +145,7 @@ class JewelboxApplication(Adw.Application):
         self._remote_control = RemoteControl(self, self.playback)
         self._remote_control.start()
         self.apply_replaygain()
+        self.apply_transition_fade()
         self.playback.add_listener(self._on_playback_state)
 
     def do_activate(self):
@@ -355,6 +356,11 @@ class JewelboxApplication(Adw.Application):
         """Applique le réglage ReplayGain (off / track / album) au moteur."""
         if self.playback is not None and self.settings is not None:
             self.playback.set_replaygain(self.settings.get_string('replaygain'))
+
+    def apply_transition_fade(self):
+        """Applique le réglage de fondu entre les morceaux (secondes)."""
+        if self.playback is not None and self.settings is not None:
+            self.playback.set_transition_fade(self.settings.get_int('transition-fade'))
 
     def _on_resume_from_device(self, *_args):
         from jewelbox.ui.resume_dialog import ResumeDialog

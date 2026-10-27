@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from gettext import gettext as _
 
 from jewelbox.api.client import ApiError
-from jewelbox.core import dynamic_mix
+from jewelbox.core import dynamic_mix, transition_fade
 from jewelbox.core.dynamic_mix import DYNAMIC_MIX_KEY
 from jewelbox.core.queue import Queue, QueueItem, RepeatMode
 from jewelbox.core.scrobble import ScrobbleTracker
@@ -74,7 +74,8 @@ class PlaybackUiState:
     sleep_ends_at: float = 0.0
 
 
-def _item_from_track(track, album_title, artist_name, stream_url, cover_url):
+def _item_from_track(track, album_title, artist_name, stream_url, cover_url,
+                     album_id=None):
     return QueueItem(
         track_id=track.id,
         title=track.title,
@@ -83,6 +84,8 @@ def _item_from_track(track, album_title, artist_name, stream_url, cover_url):
         cover_url=cover_url,
         is_favorite=track.is_favorite,
         stream_url=stream_url,
+        album_id=album_id if album_id is not None else (getattr(track, 'album_id', None) or None),
+        track_number=getattr(track, 'position', None) or None,
     )
 
 
@@ -154,6 +157,8 @@ class PlaybackSession:
         self._sleep_deadline = 0.0      # time.monotonic() de l'arrêt (mode timer)
         self._sleep_ends_at = 0.0       # même instant en heure murale (rapport)
         self._sleep_source = 0
+        # Fondu entre les morceaux (voir set_transition_fade), secondes.
+        self._transition_fade = 0
 
     @property
     def is_playing(self) -> bool:
@@ -176,7 +181,8 @@ class PlaybackSession:
             return
         cover_url = client.resolve_cover(album.cover_url)
         items = [_item_from_track(track, album.title, album.artist.name,
-                                  client.stream_url(track.id), cover_url)
+                                  client.stream_url(track.id), cover_url,
+                                  album_id=album.id)
                 for track in playable]
         start_index = next(
             (i for i, t in enumerate(playable) if t.id == start_track_id), 0)
@@ -279,7 +285,8 @@ class PlaybackSession:
             return
         cover_url = client.resolve_cover(album.cover_url)
         items = [_item_from_track(track, album.title, album.artist.name,
-                                  client.stream_url(track.id), cover_url)
+                                  client.stream_url(track.id), cover_url,
+                                  album_id=album.id)
                  for track in playable]
         self._enqueue(client, items, play_next)
 
@@ -559,7 +566,27 @@ class PlaybackSession:
 
     # ── Évènements du moteur ─────────────────────────────────────────────────
 
+    def set_transition_fade(self, seconds: int):
+        """Fondu entre les morceaux (secondes, 0 : désactivé)."""
+        self._transition_fade = seconds if seconds in transition_fade.TRANSITION_FADE_CHOICES else 0
+        if not self._transition_fade:
+            self._player.set_transition(1.0)
+
+    def _apply_transition_fade(self, position_seconds, duration_seconds):
+        if not self._transition_fade:
+            return
+        current = self._queue.state().current
+        upcoming = self._queue.peek_next()
+        previous = self._queue.peek_previous()
+        self._player.set_transition(transition_fade.fade_factor(
+            position_seconds, duration_seconds, self._transition_fade,
+            fade_in=previous is not None and not transition_fade.follows_on_album(previous, current),
+            fade_out=(upcoming is not None and upcoming is not current
+                      and not transition_fade.follows_on_album(current, upcoming)),
+        ))
+
     def _on_position(self, position_seconds, duration_seconds):
+        self._apply_transition_fade(position_seconds, duration_seconds)
         self._publish(position=position_seconds, duration=duration_seconds)
         due = self._scrobbler.tick(position_seconds, duration_seconds)
         if due is not None:

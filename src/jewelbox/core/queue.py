@@ -41,6 +41,10 @@ class QueueItem:
     cover_url: str | None = None
     is_favorite: bool = False
     stream_url: str = ''
+    # Album et numéro de piste, quand on les connaît : deux pistes qui se
+    # suivent sur un album ne sont pas séparées par le fondu (transition_fade).
+    album_id: int | None = None
+    track_number: int | None = None
 
 
 def _item_from_saved(track: dict) -> 'QueueItem | None':
@@ -58,6 +62,8 @@ def _item_from_saved(track: dict) -> 'QueueItem | None':
         cover_url=track.get('cover_url') or None,
         is_favorite=bool(track.get('is_favorite', False)),
         stream_url=str(track.get('stream_url') or ''),
+        album_id=track.get('album_id') if isinstance(track.get('album_id'), int) else None,
+        track_number=track.get('track_number') if isinstance(track.get('track_number'), int) else None,
     )
 
 
@@ -191,6 +197,13 @@ class Queue:
         if self._repeat == RepeatMode.ALL:
             return self._items[self._order[0]]
         return None
+
+    def peek_previous(self) -> QueueItem | None:
+        """La piste jouée juste avant la courante, dans l'ordre de LECTURE
+        (comme peek_next), ou None au début de la file."""
+        if not self._items or not (0 < self._position < len(self._order)):
+            return None
+        return self._items[self._order[self._position - 1]]
 
     def track_ended(self) -> QueueState:
         """La piste courante est arrivée à sa fin naturelle (à distinguer

@@ -53,6 +53,12 @@
       <summary>Normalisation du volume (ReplayGain)</summary>
       <description>off : désactivée ; track : chaque piste au même niveau ; album : chaque album au même niveau, nuances internes conservées. Sans effet sur un fichier sans tags ReplayGain.</description>
     </key>
+    <key name="transition-fade" type="i">
+      <range min="0" max="8"/>
+      <default>0</default>
+      <summary>Fondu entre les morceaux</summary>
+      <description>Secondes de fondu (0 : désactivé) : le son baisse à la fin d'un morceau et remonte au début du suivant, jamais entre deux pistes qui se suivent sur un même album.</description>
+    </key>
     <key name="smart-ranking-size" type="i">
       <range min="1" max="1000"/>
       <default>100</default>

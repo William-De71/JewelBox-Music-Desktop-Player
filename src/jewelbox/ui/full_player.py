@@ -28,6 +28,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.core.lyrics import current_line_index, parse_lyrics
 from jewelbox.ui.shortcuts import with_shortcut
 from jewelbox.ui.track_menu import menu_button
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
@@ -84,6 +85,7 @@ class FullPlayerPage(Gtk.Box):
         scroller = Gtk.ScrolledWindow(
             child=clamp, hscrollbar_policy=Gtk.PolicyType.NEVER,
             vexpand=True)
+        self._scroller = scroller
         self.append(scroller)
 
         if application.playback is not None:
@@ -105,6 +107,7 @@ class FullPlayerPage(Gtk.Box):
         box.append(self._build_controls())
         box.append(self._build_sleep_timer())
         box.append(self._build_queue())
+        box.append(self._build_lyrics())
         return box
 
     # ── Minuterie de sommeil ─────────────────────────────────────────────────
@@ -380,6 +383,142 @@ class FullPlayerPage(Gtk.Box):
             row.grab_focus()
         return False  # one-shot
 
+    # ── Paroles ──────────────────────────────────────────────────────────────
+
+    def _build_lyrics(self):
+        """Les paroles de la piste en cours, dépliables sous la file comme
+        elle. Synchronisées, elles suivent la musique (la ligne chantée en
+        avant, amenée à l'écran) et un clic sur une ligne y saute ; sinon le
+        texte brut. Demandées au serveur seulement une fois dépliées."""
+        self._lyrics_track_id = None   # piste des paroles demandées / affichées
+        self._lyrics = None
+        self._lyrics_rows = []
+        self._lyrics_index = -1
+
+        self._lyrics_toggle = Gtk.ToggleButton(css_classes=['flat'])
+        self._lyrics_toggle_arrow = Gtk.Image(icon_name='pan-down-symbolic')
+        toggle_box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
+        toggle_box.append(Gtk.Label(label=_('Paroles')))
+        toggle_box.append(self._lyrics_toggle_arrow)
+        self._lyrics_toggle.set_child(toggle_box)
+        self._lyrics_toggle.connect('toggled', self._on_lyrics_toggled)
+
+        self._lyrics_message = Gtk.Label(
+            wrap=True, justify=Gtk.Justification.CENTER, selectable=True,
+            css_classes=['dim-label'], margin_top=8)
+        self._lyrics_list = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.NONE,
+            css_classes=['background'], margin_top=8, visible=False)
+        self._lyrics_list.connect('row-activated', self._on_lyric_activated)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.append(self._lyrics_message)
+        content.append(self._lyrics_list)
+        self._lyrics_revealer = Gtk.Revealer(
+            child=content,
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=8)
+        section.append(self._lyrics_toggle)
+        section.append(self._lyrics_revealer)
+        return section
+
+    def _on_lyrics_toggled(self, button):
+        expanded = button.get_active()
+        self._lyrics_revealer.set_reveal_child(expanded)
+        self._lyrics_toggle_arrow.set_from_icon_name(
+            'pan-up-symbolic' if expanded else 'pan-down-symbolic')
+        if expanded and self._last_state is not None:
+            self._update_lyrics(self._last_state)
+
+    def _update_lyrics(self, state):
+        track_id = state.current_track_id
+        if track_id != self._lyrics_track_id:
+            self._lyrics_track_id = None
+            self._lyrics = None
+            self._show_lyrics_message('')
+            if track_id is not None and self._lyrics_revealer.get_reveal_child():
+                self._lyrics_track_id = track_id
+                self._show_lyrics_message(_('Recherche des paroles…'))
+                asyncio.get_event_loop_policy().get_event_loop().create_task(
+                    self._load_lyrics(track_id))
+        if self._lyrics is not None and self._lyrics.synced:
+            self._highlight_lyric(current_line_index(
+                self._lyrics.lines, state.position_seconds or 0.0))
+
+    async def _load_lyrics(self, track_id):
+        client = self._app.get_client()
+        try:
+            if client is None:
+                raise ApiError('no server')
+            lyrics = parse_lyrics(await client.lyrics(track_id))
+        except ApiError:
+            if self._lyrics_track_id == track_id:
+                self._show_lyrics_message(
+                    _('Paroles indisponibles (serveur injoignable ou antérieur à la 1.20).'))
+            return
+        if self._lyrics_track_id != track_id:
+            return
+        self._lyrics = lyrics
+        if lyrics.instrumental:
+            self._show_lyrics_message(_('Morceau instrumental.'))
+        elif lyrics.synced:
+            self._show_lyric_lines(lyrics.lines)
+        elif lyrics.plain:
+            self._show_lyrics_message(lyrics.plain, dim=False)
+        else:
+            self._show_lyrics_message(_('Pas de paroles trouvées pour ce titre.'))
+
+    def _show_lyrics_message(self, text, dim=True):
+        while (row := self._lyrics_list.get_row_at_index(0)) is not None:
+            self._lyrics_list.remove(row)
+        self._lyrics_rows = []
+        self._lyrics_index = -1
+        self._lyrics_list.set_visible(False)
+        self._lyrics_message.set_label(text)
+        self._lyrics_message.set_visible(bool(text))
+        self._lyrics_message.set_css_classes(['dim-label'] if dim else [])
+
+    def _show_lyric_lines(self, lines):
+        self._show_lyrics_message('')
+        for line in lines:
+            label = Gtk.Label(
+                label=line.text or '♪', wrap=True,
+                justify=Gtk.Justification.CENTER, css_classes=['dim-label'],
+                margin_top=3, margin_bottom=3)
+            row = Gtk.ListBoxRow(child=label, activatable=True)
+            row.lyric_time = line.time
+            self._lyrics_list.append(row)
+            self._lyrics_rows.append(row)
+        self._lyrics_list.set_visible(True)
+        if self._last_state is not None:
+            self._highlight_lyric(current_line_index(
+                lines, self._last_state.position_seconds or 0.0))
+
+    def _highlight_lyric(self, index):
+        if index == self._lyrics_index:
+            return
+        for i in (self._lyrics_index, index):
+            if 0 <= i < len(self._lyrics_rows):
+                self._lyrics_rows[i].get_child().set_css_classes(
+                    ['heading'] if i == index else ['dim-label'])
+        self._lyrics_index = index
+        if 0 <= index < len(self._lyrics_rows) and self._lyrics_revealer.get_reveal_child():
+            self._scroll_into_view(self._lyrics_rows[index])
+
+    def _scroll_into_view(self, widget):
+        """Centre la ligne chantée dans la page, sans voler le focus."""
+        ok, bounds = widget.compute_bounds(self._scroller.get_child())
+        if not ok:
+            return
+        adjustment = self._scroller.get_vadjustment()
+        target = bounds.get_y() + bounds.get_height() / 2 - adjustment.get_page_size() / 2
+        upper = adjustment.get_upper() - adjustment.get_page_size()
+        adjustment.set_value(max(0.0, min(upper, target)))
+
+    def _on_lyric_activated(self, _box, row):
+        if self._app.playback is not None and hasattr(row, 'lyric_time'):
+            self._app.playback.seek(row.lyric_time)
+
     def _move(self, from_index, to_index):
         if self._app.playback is not None:
             self._app.playback.move_in_queue(from_index, to_index)
@@ -587,6 +726,7 @@ class FullPlayerPage(Gtk.Box):
 
         self._last_state = state
         self._update_queue(state)
+        self._update_lyrics(state)
         self._update_sleep(state)
         self._title_label.set_label(state.title or '')
         self._artist_label.set_label(state.artist or '')
