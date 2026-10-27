@@ -54,6 +54,10 @@ class Player:
         # ReplayGain : 'off', 'track' ou 'album' (voir set_replaygain).
         self._replaygain = 'off'
         self._rgvolume = None
+        # Volume choisi (0–1) et fondu de la minuterie de sommeil : playbin3
+        # reçoit leur produit, get_volume() rend le volume choisi.
+        self._volume = 1.0
+        self._fade = 1.0
         self._poll_source_id: int | None = None
 
         self.on_position = None
@@ -144,10 +148,19 @@ class Player:
 
     def set_volume(self, volume: float):
         """Volume linéaire 0.0–1.0 (propriété volume de playbin3)."""
-        self._playbin.set_property('volume', max(0.0, min(1.0, volume)))
+        self._volume = max(0.0, min(1.0, volume))
+        self._apply_volume()
 
     def get_volume(self) -> float:
-        return self._playbin.get_property('volume')
+        return self._volume
+
+    def set_fade(self, factor: float):
+        """Fondu de la minuterie de sommeil : multiplie le volume choisi."""
+        self._fade = max(0.0, min(1.0, factor))
+        self._apply_volume()
+
+    def _apply_volume(self):
+        self._playbin.set_property('volume', self._volume * self._fade)
 
     def set_mute(self, muted: bool):
         self._playbin.set_property('mute', bool(muted))

@@ -17,10 +17,12 @@ playback/remote_control.py exécute ; ici on décide :
 import json
 from dataclasses import dataclass
 
+from jewelbox.core.sleep_timer import live_sleep_timer
+
 # Ce que ce lecteur sait faire au-delà de lecture / pause / suivant /
 # précédent (liste du serveur, utils/remote.js).
 CAPABILITIES = ('seek', 'volume', 'mute', 'shuffle', 'repeat', 'queue',
-                'play_media', 'append')
+                'play_media', 'append', 'sleep_timer')
 
 # En lecture, un rapport au moins toutes les HEARTBEAT secondes : sans flux
 # ouvert, le serveur oublie un lecteur muet depuis 90 s.
@@ -77,6 +79,8 @@ class LiveState:
     muted: bool = False
     shuffle: bool = False
     repeat: str = 'off'
+    # None, {'end_of_track': True} ou {'ends_at': date ISO}.
+    sleep_timer: dict | None = None
 
     def payload(self, device_label: str) -> dict:
         body = {
@@ -88,6 +92,7 @@ class LiveState:
             'muted': self.muted,
             'shuffle': self.shuffle,
             'repeat': self.repeat,
+            'sleep_timer': self.sleep_timer,
             'device_label': device_label,
         }
         if self.track_id is not None:
@@ -111,6 +116,7 @@ def live_state_of(state) -> LiveState:
         muted=state.muted,
         shuffle=state.shuffle,
         repeat=state.repeat,
+        sleep_timer=live_sleep_timer(state.sleep_mode, state.sleep_ends_at),
     )
 
 

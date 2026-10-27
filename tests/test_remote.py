@@ -23,6 +23,8 @@ class _UiState:
     muted: bool = False
     shuffle: bool = False
     repeat: str = 'off'
+    sleep_mode: str | None = None
+    sleep_ends_at: float = 0.0
 
 
 # ── SseParser ───────────────────────────────────────────────────────────────
@@ -55,7 +57,20 @@ def test_live_state_of_a_playing_session():
         'playback_state': 'playing', 'track_id': 7, 'current_index': 2,
         'position_sec': 12.0, 'duration_sec': 200.0, 'volume': 50,
         'muted': False, 'shuffle': True, 'repeat': 'all',
-        'device_label': 'Bureau'}
+        'sleep_timer': None, 'device_label': 'Bureau'}
+
+
+def test_live_state_carries_the_sleep_timer():
+    assert live_state_of(_UiState(sleep_mode='track')).sleep_timer == {'end_of_track': True}
+    timed = live_state_of(_UiState(sleep_mode='timer', sleep_ends_at=1793140200.4))
+    assert timed.payload('x')['sleep_timer'] == {'ends_at': '2026-10-27T22:30:00Z'}
+
+
+def test_a_sleep_timer_change_is_reported():
+    reporter = LiveReporter()
+    reporter.update(_live(), now=0)
+    assert reporter.update(_live(sleep_timer={'end_of_track': True}), now=0.5)
+    assert not reporter.update(_live(sleep_timer={'end_of_track': True}), now=1)
 
 
 def test_live_state_of_an_empty_session():

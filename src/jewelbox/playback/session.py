@@ -27,6 +27,7 @@ from jewelbox.core import dynamic_mix
 from jewelbox.core.dynamic_mix import DYNAMIC_MIX_KEY
 from jewelbox.core.queue import Queue, QueueItem, RepeatMode
 from jewelbox.core.scrobble import ScrobbleTracker
+from jewelbox.core.sleep_timer import FADE_SECONDS, fade_factor
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,9 @@ class PlaybackUiState:
     # de la piste en cours).
     sleep_mode: str | None = None
     sleep_remaining_seconds: float = 0.0
+    # Heure murale (secondes epoch) de l'arrêt en mode 'timer' : ce que
+    # l'état en direct rapporte au contrôleur à distance.
+    sleep_ends_at: float = 0.0
 
 
 def _item_from_track(track, album_title, artist_name, stream_url, cover_url):
@@ -148,6 +152,7 @@ class PlaybackSession:
         # Minuterie de sommeil (voir set_sleep_timer).
         self._sleep_mode: str | None = None
         self._sleep_deadline = 0.0      # time.monotonic() de l'arrêt (mode timer)
+        self._sleep_ends_at = 0.0       # même instant en heure murale (rapport)
         self._sleep_source = 0
 
     @property
@@ -317,32 +322,50 @@ class PlaybackSession:
     # ── Minuterie de sommeil ─────────────────────────────────────────────────
 
     def set_sleep_timer(self, mode):
-        """None : désactive. Un entier : met en pause dans autant de minutes.
-        'track' : met en pause à la fin de la piste en cours (la suivante est
-        chargée, prête à reprendre)."""
+        """None : désactive. Un entier : met en pause dans autant de minutes,
+        en baissant le son sur les FADE_SECONDS dernières. 'track' : met en
+        pause à la fin de la piste en cours (la suivante est chargée, prête à
+        reprendre)."""
         from gi.repository import GLib
 
         if self._sleep_source:
             GLib.source_remove(self._sleep_source)
             self._sleep_source = 0
+        self._player.set_fade(1.0)
         if mode is None:
             self._sleep_mode = None
         elif mode == 'track':
             self._sleep_mode = 'track'
         else:
+            seconds = int(mode) * 60
             self._sleep_mode = 'timer'
-            self._sleep_deadline = time.monotonic() + int(mode) * 60
+            self._sleep_deadline = time.monotonic() + seconds
+            self._sleep_ends_at = time.time() + seconds
+            # Rien à faire avant le fondu : un seul réveil, puis un pas de
+            # 250 ms pendant les dernières secondes.
             self._sleep_source = GLib.timeout_add_seconds(
-                int(mode) * 60, self._on_sleep_timer)
+                max(0, int(seconds - FADE_SECONDS)), self._on_sleep_fade_start)
         self._publish()
 
-    def _on_sleep_timer(self):
+    def _on_sleep_fade_start(self):
+        from gi.repository import GLib
+
+        self._sleep_source = GLib.timeout_add(250, self._on_sleep_tick)
+        self._on_sleep_tick()
+        return False
+
+    def _on_sleep_tick(self):
+        remaining = self._sleep_deadline - time.monotonic()
+        if remaining > 0:
+            self._player.set_fade(fade_factor(remaining))
+            return True
         self._sleep_source = 0
         self._sleep_mode = None
         if self._player.is_playing:
             self.toggle_play_pause()
-        else:
-            self._publish()
+        # Volume rendu après la pause : la reprise repart au niveau choisi.
+        self._player.set_fade(1.0)
+        self._publish()
         return False
 
     def _set_source(self, source_type, source_ref):
@@ -912,6 +935,7 @@ class PlaybackSession:
             sleep_remaining_seconds=(
                 max(0.0, self._sleep_deadline - time.monotonic())
                 if self._sleep_mode == 'timer' else 0.0),
+            sleep_ends_at=self._sleep_ends_at if self._sleep_mode == 'timer' else 0.0,
         )
 
     def _run(self, coroutine):

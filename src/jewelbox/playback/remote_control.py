@@ -17,7 +17,7 @@ from gettext import gettext as _
 from gi.repository import Gio, GLib, Soup
 
 from jewelbox.api.client import ApiError
-from jewelbox.core import remote
+from jewelbox.core import remote, sleep_timer
 from jewelbox.playback.queue_sync import device_label
 from jewelbox.ui.smart_specs import smart_spec
 
@@ -161,6 +161,8 @@ class RemoteControl:
             playback.set_shuffle(bool(command.get('shuffle')))
         elif name == 'repeat' and command.get('repeat') in ('off', 'all', 'one'):
             playback.set_repeat(command['repeat'])
+        elif name == 'sleep_timer':
+            playback.set_sleep_timer(sleep_timer.mode_from_command(command))
         elif name == 'play_index':
             self._play_index(int(command.get('index', -1)))
         elif name == 'play_media':
