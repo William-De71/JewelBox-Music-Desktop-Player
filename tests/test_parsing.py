@@ -253,6 +253,12 @@ def test_dynamic_mix_played_defaults():
     assert result.tracks == ()
 
 
+def test_dynamic_mix_blocked():
+    tracks = parsing.parse_dynamic_mix_blocked({'data': [QUEUE_TRACK]})
+    assert [t.id for t in tracks] == [71]
+    assert parsing.parse_dynamic_mix_blocked({}) == ()
+
+
 # ── recherche ─────────────────────────────────────────────────────────────────
 
 def test_search_results_both_sections():

@@ -11,8 +11,9 @@ de l'accueil, au même titre qu'un album ou une playlist utilisateur.
 
 Le mix dynamique (clé dynamic_mix) est le seul modifiable : la barre du shell
 offre « Relancer un mix complet » (tire un tout nouveau tirage) et chaque piste
-porte un bouton « Retirer du mix ». Ces deux appels renvoient la liste à jour,
-avec laquelle la fiche se rafraîchit.
+porte un menu « Retirer du mix » / « Ne plus jamais jouer » (liste noire,
+gardée par le serveur). Ces appels renvoient la liste à jour, avec laquelle la
+fiche se rafraîchit.
 
 Code frontière (exclu de la couverture) : cette page ne fait qu'afficher une
 SmartPlaylist chargée par api.client et déléguer la lecture / les mutations du
@@ -26,6 +27,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.track_menu import menu_button
 from jewelbox.ui.smart_specs import DYNAMIC_MIX_KEY, smart_spec
 
 _COVER_SIZE = 48
@@ -270,15 +272,15 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         row_box.append(duration_label)
         row_box.append(favorite_button)
 
-        # Bouton « Retirer du mix » : seulement pour le mix dynamique, et sur
-        # une piste jouable (une piste sans fichier n'y figure pas de toute
-        # façon, mais on reste homogène avec la fiche playlist).
+        # Menu « Retirer du mix » / « Ne plus jamais jouer » : seulement pour
+        # le mix dynamique.
         if self._is_dynamic:
-            remove = Gtk.Button(
-                icon_name='window-close-symbolic', css_classes=['flat'],
-                valign=Gtk.Align.CENTER, tooltip_text=_('Retirer du mix'))
-            remove.connect('clicked', self._on_remove_mix_track, track.id)
-            row_box.append(remove)
+            row_box.append(menu_button(
+                [(_('Retirer du mix'),
+                  lambda track_id=track.id: self._on_remove_mix_track(track_id)),
+                 (_('Ne plus jamais jouer'),
+                  lambda track_id=track.id: self._on_block_mix_track(track_id))],
+                icon_name='window-close-symbolic', tooltip=_('Retirer du mix')))
 
         row = Gtk.ListBoxRow(activatable=track.has_file, child=row_box)
         if not track.has_file:
@@ -299,26 +301,42 @@ class SmartPlaylistDetailPage(Gtk.Stack):
         task = self._run_mix(lambda client: client.dynamic_mix_refresh())
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
 
-    def _on_remove_mix_track(self, _button, track_id):
+    def _on_remove_mix_track(self, track_id):
         task = self._run_mix(lambda client: client.dynamic_mix_remove(track_id),
                              sync_queue=True)
         asyncio.get_event_loop_policy().get_event_loop().create_task(task)
 
-    async def _run_mix(self, call, sync_queue=False):
+    def _on_block_mix_track(self, track_id):
+        task = self._run_mix(lambda client: client.dynamic_mix_block(track_id),
+                             sync_queue=True, done_toast=_('Ce titre ne sera plus joué dans le mix'))
+        asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+    async def _run_mix(self, call, sync_queue=False, done_toast=None):
         """dynamic_mix_refresh renvoie une SmartPlaylist ; dynamic_mix_remove
         un DynamicMixPlayed. Les deux exposent .tracks : on rafraîchit avec.
 
         sync_queue (retrait manuel) : si le mix est en cours de lecture, la
         file suit aussi — la piste retirée n'est plus jouée, même si c'est
-        celle en cours, et le complément du serveur est ajouté à la fin."""
+        celle en cours, et le complément du serveur est ajouté à la fin.
+
+        done_toast (liste noire) : message affiché en cas de succès ; un échec
+        l'est aussi, la piste n'ayant pas été exclue."""
         client = self._app.get_client()
         if client is None:
             return
+        root = self.get_root()
+        toast = getattr(root, 'show_toast', None) if done_toast else None
         try:
             result = await call(client)
-        except ApiError:
+        except ApiError as error:
+            if toast is not None:
+                # 404 sur la route elle-même : serveur antérieur à la liste noire.
+                toast(_('Liste noire indisponible : mettez le serveur à jour')
+                      if error.status == 404 else _('Action impossible'))
             return
         self._apply(client, result.tracks)
+        if toast is not None:
+            toast(done_toast)
         playback = self._app.playback
         if sync_queue and playback is not None:
             playback.sync_dynamic_mix(result.tracks, yank_current=True)
