@@ -1,6 +1,6 @@
 """Dialogue Préférences : configuration du serveur JewelBox (page Serveur)
 et réglages de lecture (page Lecture : arrière-plan, notifications, taille
-des classements intelligents).
+des classements intelligents, liste noire du mix dynamique).
 
 Même logique que l'écran Réglages du client Android (SettingsViewModel) :
 « Enregistrer » persiste l'URL normalisée immédiatement — même serveur
@@ -11,6 +11,7 @@ l'URL seule suffit). « Tester » interroge /api/health sans rien persister.
 
 import asyncio
 from gettext import gettext as _
+from gettext import ngettext
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
@@ -152,6 +153,30 @@ class PreferencesDialog(Adw.PreferencesDialog):
         fade.connect('notify::selected', self._on_transition_fade_changed)
         group.add(fade)
 
+        self._add_blocklist_group(page)
+
+    def _add_blocklist_group(self, page):
+        """Liste noire du mix dynamique (« Ne plus jamais jouer »), gardée par
+        le serveur pour tous les appareils : combien de titres, et « Vider »."""
+        group = Adw.PreferencesGroup(
+            title=_('Mix dynamique'),
+            description=_('Les titres marqués « Ne plus jamais jouer » ne sont '
+                          'plus tirés dans le mix, sur tous vos appareils.'))
+        page.add(group)
+        self._blocked_row = Adw.ActionRow(
+            title=_('Titres exclus'), subtitle=_('Chargement…'))
+        self._clear_blocked_button = Gtk.Button(
+            label=_('Vider'), valign=Gtk.Align.CENTER, sensitive=False,
+            css_classes=['destructive-action'])
+        self._clear_blocked_button.connect('clicked', self._on_clear_blocked)
+        self._blocked_row.add_suffix(self._clear_blocked_button)
+        group.add(self._blocked_row)
+        client = self._saved_client()
+        if client is None:
+            self._set_blocked_count(None)
+        else:
+            self._run_async(self._load_blocked(client))
+
     @staticmethod
     def _replaygain_choices():
         # Construit à l'appel (et non à l'import) : gettext doit voir la
@@ -199,6 +224,32 @@ class PreferencesDialog(Adw.PreferencesDialog):
             self._url_row.set_text(client.base_url)
             self._run_async(self._save_identity(client))
 
+    def _on_clear_blocked(self, _button):
+        dialog = Adw.AlertDialog(
+            heading=_('Vider la liste noire ?'),
+            body=_('Tous les titres exclus pourront de nouveau être tirés '
+                   'dans le mix dynamique.'))
+        dialog.add_response('cancel', _('Annuler'))
+        dialog.add_response('clear', _('Vider'))
+        dialog.set_response_appearance('clear', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_close_response('cancel')
+
+        def on_response(_dialog, response):
+            client = self._saved_client()
+            if response == 'clear' and client is not None:
+                self._run_async(self._clear_blocked(client))
+
+        dialog.connect('response', on_response)
+        dialog.present(self)
+
+    def _saved_client(self):
+        """Client du serveur enregistré (pas de l'adresse en cours d'édition)."""
+        try:
+            return JewelBoxClient(self._settings.get_string('server-url'),
+                                  device_id=self._device_id)
+        except ValueError:
+            return None
+
     def _client_or_error(self):
         try:
             return JewelBoxClient(self._url_row.get_text(),
@@ -243,7 +294,33 @@ class PreferencesDialog(Adw.PreferencesDialog):
         finally:
             self._set_busy(False)
 
+    async def _load_blocked(self, client):
+        try:
+            self._set_blocked_count(len(await client.dynamic_mix_blocked()))
+        except ApiError:
+            self._set_blocked_count(None)
+
+    async def _clear_blocked(self, client):
+        self._clear_blocked_button.set_sensitive(False)
+        try:
+            await client.dynamic_mix_clear_blocked()
+            self._set_blocked_count(0)
+        except ApiError:
+            self._set_blocked_count(None)
+
     # ── Aides ────────────────────────────────────────────────────────────────
+
+    def _set_blocked_count(self, count):
+        """count None : inconnu (serveur injoignable ou antérieur à 1.22)."""
+        if count is None:
+            subtitle = _('Indisponible (serveur 1.22 ou plus requis)')
+        elif count == 0:
+            subtitle = _('Aucun titre exclu')
+        else:
+            subtitle = ngettext('{count} titre exclu', '{count} titres exclus',
+                                count).format(count=count)
+        self._blocked_row.set_subtitle(subtitle)
+        self._clear_blocked_button.set_sensitive(bool(count))
 
     def _run_async(self, coroutine):
         asyncio.get_event_loop_policy().get_event_loop().create_task(coroutine)

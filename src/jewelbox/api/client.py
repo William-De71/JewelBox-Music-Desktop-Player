@@ -263,6 +263,22 @@ class JewelBoxClient:
         data = await self._delete(f'/api/smart-playlists/dynamic_mix/tracks/{track_id}')
         return parsing.parse_dynamic_mix_played(data)
 
+    async def dynamic_mix_block(self, track_id: int):
+        """« Ne plus jamais jouer » : retire la piste et la met en liste
+        noire, le mix ne la tire plus (serveur >= 1.22 ; 404 avant)."""
+        data = await self._post('/api/smart-playlists/dynamic_mix/blocked',
+                                {'track_id': track_id})
+        return parsing.parse_dynamic_mix_played(data)
+
+    async def dynamic_mix_blocked(self):
+        """Les pistes en liste noire du mix (serveur >= 1.22)."""
+        data = await self._get('/api/smart-playlists/dynamic_mix/blocked')
+        return parsing.parse_dynamic_mix_blocked(data)
+
+    async def dynamic_mix_clear_blocked(self):
+        """Vide la liste noire du mix (serveur >= 1.22)."""
+        await self._delete('/api/smart-playlists/dynamic_mix/blocked')
+
     # ── File partagée entre appareils (X-Device-Id) ──────────────────────────
 
     async def save_queue(self, track_ids, current_index: int,

@@ -226,6 +226,11 @@ def parse_dynamic_mix_played(data) -> DynamicMixPlayed:
     )
 
 
+def parse_dynamic_mix_blocked(data) -> tuple:
+    data = _require_dict(data, 'dynamic-mix-blocked')
+    return tuple(parse_queue_track(track) for track in _list(data, 'data'))
+
+
 def parse_search_results(data) -> SearchResults:
     data = _require_dict(data, 'search')
     return SearchResults(
