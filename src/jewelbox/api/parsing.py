@@ -20,6 +20,8 @@ from jewelbox.api.models import (
     Playlist,
     PlaylistSummary,
     QueueDevice,
+    RemoteDevice,
+    RemoteState,
     QueueTrack,
     Radio,
     SearchResults,
@@ -357,3 +359,57 @@ def parse_genres(data) -> tuple[str, ...]:
             seen.add(key)
             genres.append(genre.strip())
     return tuple(genres)
+
+
+def _opt_number(data: dict, key: str) -> float | None:
+    value = data.get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _opt_bool(data: dict, key: str) -> bool | None:
+    value = data.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def parse_remote_state(data) -> RemoteState:
+    data = _require_dict(data, 'remote-state')
+    track = data.get('track')
+    try:
+        track = parse_queue_track(track) if isinstance(track, dict) else None
+    except ParseError:
+        track = None
+    volume = _opt_number(data, 'volume')
+    return RemoteState(
+        playback_state=_str(data, 'playback_state', 'idle'),
+        position_sec=_opt_number(data, 'position_sec') or 0.0,
+        duration_sec=_opt_number(data, 'duration_sec') or 0.0,
+        current_index=_int(data, 'current_index', -1),
+        track_id=_opt_int(data, 'track_id'),
+        volume=None if volume is None else round(volume),
+        muted=_opt_bool(data, 'muted'),
+        shuffle=_opt_bool(data, 'shuffle'),
+        repeat=_opt_str(data, 'repeat'),
+        track=track,
+        reported_at=_opt_str(data, 'reported_at'),
+    )
+
+
+def parse_remote_device(data) -> RemoteDevice:
+    data = _require_dict(data, 'remote-device')
+    state = data.get('state')
+    capabilities = data.get('capabilities')
+    return RemoteDevice(
+        device_id=_req_str(data, 'device_id', 'remote-device'),
+        device_label=_opt_str(data, 'device_label'),
+        controllable=_bool(data, 'controllable'),
+        capabilities=tuple(c for c in capabilities if isinstance(c, str))
+        if isinstance(capabilities, list) else (),
+        state=parse_remote_state(state) if isinstance(state, dict) else None,
+    )
+
+
+def parse_remote_devices(data) -> tuple[RemoteDevice, ...]:
+    data = _require_dict(data, 'remote-devices')
+    return tuple(parse_remote_device(row) for row in _list(data, 'data'))

@@ -26,6 +26,7 @@ from gi.repository import Adw, Gdk, GLib, Gio, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.remote import play_on_button
 
 _COVER_SIZE = 48
 
@@ -119,6 +120,8 @@ class PlaylistDetailPage(Gtk.Stack):
 
         end_box = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
         end_box.append(self._play_button)
+        end_box.append(play_on_button(
+            self._app, lambda: ('playlist', self._playlist_id), label=False))
         end_box.append(rename)
         end_box.append(delete)
 

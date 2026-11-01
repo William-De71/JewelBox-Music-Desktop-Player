@@ -329,6 +329,29 @@ class JewelBoxClient:
         headers.append('Accept', 'text/event-stream')
         return message
 
+    def remote_watch_message(self):
+        """Requête du flux des lecteurs (text/event-stream) pour la
+        télécommande, ouverte et lue par ui/remote.py."""
+        url = server_url.api_url(self.base_url, '/api/player/remote/watch')
+        message = Soup.Message.new('GET', url)
+        if message is None:
+            raise ApiError(f'URL invalide : {url}')
+        message.get_request_headers().append('Accept', 'text/event-stream')
+        return message
+
+    async def remote_devices(self):
+        """Les lecteurs vus par le serveur (serveur >= 1.18)."""
+        return parsing.parse_remote_devices(
+            await self._get('/api/player/remote/devices'))
+
+    async def remote_command(self, device_id: str, command: dict) -> None:
+        """Un ordre pour un autre lecteur (core.remote_controller), 202 une
+        fois relayé ; il le confirme par son prochain rapport d'état."""
+        from urllib.parse import quote
+        await self._post(
+            f'/api/player/remote/devices/{quote(device_id, safe="")}/commands',
+            command)
+
     async def clear_queue(self) -> None:
         await self._delete('/api/player/queue')
 

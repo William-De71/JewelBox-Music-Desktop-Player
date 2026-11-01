@@ -234,3 +234,36 @@ class Radio:
     artist_name: str = ''
     genre: str | None = None
     tracks: tuple[QueueTrack, ...] = ()
+
+
+@dataclass(frozen=True)
+class RemoteState:
+    """L'état en direct qu'un lecteur a rapporté (utils/remote.js du
+    serveur) : ce qu'affiche la télécommande."""
+
+    playback_state: str = 'idle'   # 'playing' | 'paused' | 'idle'
+    position_sec: float = 0.0
+    duration_sec: float = 0.0
+    current_index: int = -1
+    track_id: int | None = None
+    volume: int | None = None      # 0–100
+    muted: bool | None = None
+    shuffle: bool | None = None
+    repeat: str | None = None
+    # La piste courante, résolue par le serveur (format QueueTrack).
+    track: QueueTrack | None = None
+    # Date ISO du rapport, pour extrapoler la position en lecture.
+    reported_at: str | None = None
+
+
+@dataclass(frozen=True)
+class RemoteDevice:
+    """Un lecteur vu par le serveur (GET /api/player/remote/devices, et les
+    évènements de /api/player/remote/watch). Seul un lecteur controllable
+    (son flux d'ordres ouvert) accepte des commandes."""
+
+    device_id: str
+    device_label: str | None = None
+    controllable: bool = False
+    capabilities: tuple[str, ...] = ()
+    state: RemoteState | None = None

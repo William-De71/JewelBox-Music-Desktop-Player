@@ -21,6 +21,7 @@ from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
 from jewelbox.ui.radio import start_radio
+from jewelbox.ui.remote import play_on_button
 from jewelbox.ui.track_menu import menu_button, queue_entries
 
 
@@ -137,6 +138,8 @@ class AlbumDetailPage(Gtk.Stack):
         actions = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER, margin_top=8)
         actions.append(radio)
         actions.append(add_album)
+        actions.append(play_on_button(
+            self._app, lambda: ('album', self._album_id)))
         header.append(actions)
 
         self._tracks_box = Gtk.ListBox(

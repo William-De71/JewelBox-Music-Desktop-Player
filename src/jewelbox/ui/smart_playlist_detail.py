@@ -28,6 +28,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
 from jewelbox.ui.track_menu import menu_button
+from jewelbox.ui.remote import play_on_button
 from jewelbox.ui.smart_specs import DYNAMIC_MIX_KEY, smart_spec
 
 _COVER_SIZE = 48
@@ -117,6 +118,8 @@ class SmartPlaylistDetailPage(Gtk.Stack):
 
         end_box = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
         end_box.append(self._play_button)
+        end_box.append(play_on_button(
+            self._app, lambda: ('smart', self._key), label=False))
 
         # Seul le mix dynamique se relance ; pour les autres listes, ce bouton
         # n'est pas ajouté (rien à recalculer côté client).

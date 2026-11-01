@@ -17,3 +17,4 @@ src/jewelbox/playback/notifier.py
 src/jewelbox/ui/track_menu.py
 src/jewelbox/ui/radio.py
 src/jewelbox/ui/resume_dialog.py
+src/jewelbox/ui/remote.py
