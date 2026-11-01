@@ -4,12 +4,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
-from jewelbox.api.models import RemoteDevice, RemoteState  # noqa: E402
+from dataclasses import replace  # noqa: E402
+
+from jewelbox.api.models import (  # noqa: E402
+    DeviceQueue, QueueTrack, RemoteDevice, RemoteState)
 from jewelbox.core.remote_controller import (  # noqa: E402
     apply_watch_event, controllable_others, device_icon_name, live_position,
     mute_command, next_repeat, play_index_command, play_media_command,
     repeat_command, seek_command, shuffle_command, simple_command,
-    volume_command)
+    take_over_queue, volume_command)
 
 DESK = {
     'device_id': 'desk', 'device_label': 'JewelBox bureau · fedora',
@@ -85,6 +88,34 @@ def test_the_position_moves_on_while_playing_up_to_the_end():
     undated = RemoteState(playback_state='playing', position_sec=60.0,
                           reported_at='yesterday')
     assert live_position(undated, at + 10) == 60.0
+
+
+# ── take_over_queue ──────────────────────────────────────────────────────────
+
+def test_listen_here_starts_at_the_live_track_and_position():
+    at = datetime.fromisoformat('2026-10-31T13:34:22.588+00:00').timestamp()
+    queue = DeviceQueue(
+        device_id='desk', current_index=0, position_sec=5.0,
+        tracks=tuple(QueueTrack(id=i, title=f'T{i}', has_file=True)
+                     for i in (7, 8, 9)))
+    live = RemoteState(playback_state='playing', position_sec=60.0,
+                       duration_sec=200.0, current_index=1, track_id=8,
+                       reported_at='2026-10-31T13:34:22.588Z')
+    taken = take_over_queue(queue, live, at + 10)
+    assert taken.current_index == 1
+    assert abs(taken.position_sec - 70.0) < 0.001
+    assert taken.tracks == queue.tracks
+
+    # Index en direct décalé (aléatoire là-bas), mais celui enregistré colle.
+    saved = take_over_queue(
+        queue, replace(live, current_index=2, track_id=7), at)
+    assert saved.current_index == 0
+    assert abs(saved.position_sec - 60.0) < 0.001
+
+    # Piste inconnue de la file enregistrée, ou pas d'état : telle quelle.
+    assert take_over_queue(queue, replace(live, track_id=42), at) == queue
+    assert take_over_queue(queue, replace(live, track_id=None), at) == queue
+    assert take_over_queue(queue, None, at) == queue
 
 
 # ── Ordres ───────────────────────────────────────────────────────────────────

@@ -12,9 +12,11 @@ ui/remote.py affiche et envoie ; ici on décide :
 - apply_watch_event tient la liste à jour ;
 - controllable_others dit qui peut être piloté ;
 - live_position fait avancer la position entre deux rapports ;
+- take_over_queue cale la file reprise par « Écouter ici » sur le direct ;
 - les fonctions *_command construisent les corps d'ordres.
 """
 
+from dataclasses import replace
 from datetime import datetime
 
 from jewelbox.api import parsing
@@ -74,6 +76,32 @@ def live_position(state, now: float) -> float:
     if state.duration_sec > 0:
         position = min(position, state.duration_sec)
     return position
+
+
+def take_over_queue(queue, state, now: float):
+    """« Écouter ici » : la file que ce lecteur a laissée sur le serveur,
+    calée sur où il en est maintenant. Sa piste et sa position en direct sont
+    plus fraîches que celles enregistrées (toutes les 30 s environ en
+    lecture) ; on garde ces dernières si le direct ne correspond pas à la
+    file (un changement pas encore enregistré).
+
+    queue : DeviceQueue ; state : RemoteState ou None ; now : secondes epoch."""
+    if state is None or state.track_id is None:
+        return queue
+
+    def track_id_at(index):
+        if 0 <= index < len(queue.tracks):
+            return queue.tracks[index].id
+        return None
+
+    if track_id_at(state.current_index) == state.track_id:
+        index = state.current_index
+    elif track_id_at(queue.current_index) == state.track_id:
+        index = queue.current_index
+    else:
+        return queue
+    return replace(queue, current_index=index,
+                   position_sec=live_position(state, now))
 
 
 def next_repeat(mode) -> str:

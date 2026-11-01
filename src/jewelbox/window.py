@@ -297,6 +297,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
             return
         page = RemoteDevicesPage(self.get_application(), self._remote_watcher)
         page.on_device_activated = self._open_remote_device
+        page.on_listened_here = self._listened_here
         self._nav.push(Adw.NavigationPage(
             child=page, title=_('Appareils'), tag='remote-devices'))
 
@@ -305,7 +306,14 @@ class JewelboxWindow(Adw.ApplicationWindow):
             self.get_application(), self._remote_watcher, device_id)
         nav_page = Adw.NavigationPage(child=page, title=_('Télécommande'))
         page.on_title_known = nav_page.set_title
+        page.on_listened_here = self._listened_here
         self._nav.push(nav_page)
+
+    def _listened_here(self):
+        """« Écouter ici » fait : les pages de télécommande cèdent la place au
+        grand lecteur de ce poste."""
+        self._nav.pop_to_page(self._root_page)
+        self._open_full_player()
 
     def _pop_if_current(self, nav_page):
         # Ne dépile que si la fiche est bien en tête (l'utilisateur a pu

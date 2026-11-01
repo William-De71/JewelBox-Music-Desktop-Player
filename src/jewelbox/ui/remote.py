@@ -7,7 +7,8 @@ core.remote_controller, pur et testé. Ici :
   les pages tant que l'une d'elles est affichée ;
 - RemoteDevicesPage liste les lecteurs pilotables ;
 - RemoteControlPage est la télécommande de l'un d'eux ;
-- play_on_button est le bouton « Lire sur… » des fiches album / playlist.
+- play_on_button est le bouton « Lire sur… » des fiches album / playlist ;
+- listen_here prend la lecture d'un lecteur pour la jouer sur ce poste.
 
 Parité avec ui/remote/ côté Android.
 """
@@ -22,6 +23,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango, Soup
 from jewelbox.api.client import ApiError
 from jewelbox.core import remote, remote_controller
 from jewelbox.core.formats import format_duration
+from jewelbox.ui.resume_dialog import resume_device
 
 # Le serveur écrit un commentaire toutes les 20 s : sans rien pendant 60 s,
 # la connexion est morte et on la rouvre.
@@ -71,6 +73,33 @@ def send_command(app, widget, device_id, command):
             _toast(widget, _('La commande n’a pas abouti'))
 
     _loop().create_task(run())
+
+
+def listen_here(app, widget, device, on_done):
+    """« Écouter ici » : joue la file de device sur ce poste, à sa piste et à
+    sa position du moment, puis le met en pause là-bas. on_done() une fois la
+    lecture lancée ici ; un échec est signalé par un toast."""
+    state = device.state
+
+    async def run():
+        if await resume_device(app, device, live_state=state) != 'ok':
+            _toast(widget, _('Impossible de reprendre cette lecture ici'))
+            return
+        if state is not None and state.playback_state == 'playing':
+            client = app.get_client()
+            try:
+                await client.remote_command(
+                    device.device_id, remote_controller.simple_command('pause'))
+            except ApiError:
+                pass
+        on_done()
+
+    _loop().create_task(run())
+
+
+def _listen_here_done(page):
+    if page.on_listened_here is not None:
+        page.on_listened_here()
 
 
 async def _load_texture(app, cover_url):
@@ -216,6 +245,7 @@ class RemoteDevicesPage(_WatchingMixin, Gtk.Stack):
         super().__init__(transition_type=Gtk.StackTransitionType.CROSSFADE)
         self._app = app
         self.on_device_activated = None
+        self.on_listened_here = None
 
         self.add_named(Gtk.Spinner(spinning=True, halign=Gtk.Align.CENTER,
                                    valign=Gtk.Align.CENTER), 'loading')
@@ -260,6 +290,12 @@ class RemoteDevicesPage(_WatchingMixin, Gtk.Stack):
             icon_name=remote_controller.device_icon_name(device.device_label),
             pixel_size=32))
         if track is not None:
+            listen = Gtk.Button(
+                icon_name='audio-headphones-symbolic', tooltip_text=_('Écouter ici'),
+                valign=Gtk.Align.CENTER, css_classes=['flat', 'circular'])
+            listen.connect('clicked', lambda *_a: listen_here(
+                self._app, self, device, lambda: _listen_here_done(self)))
+            row.add_suffix(listen)
             playing = state.playback_state == 'playing'
             toggle = Gtk.Button(
                 icon_name='media-playback-pause-symbolic' if playing
@@ -289,6 +325,7 @@ class RemoteControlPage(_WatchingMixin, Gtk.Stack):
         self._device_id = device_id
         self._device = None
         self.on_title_known = None
+        self.on_listened_here = None
         self._cover_url = None
         self._queue_key = object()
         self._queue_generation = 0
@@ -385,6 +422,12 @@ class RemoteControlPage(_WatchingMixin, Gtk.Stack):
         self._volume_box.append(self._mute_button)
         self._volume_box.append(self._volume_scale)
 
+        self._listen_button = Gtk.Button(
+            child=Adw.ButtonContent(icon_name='audio-headphones-symbolic',
+                                    label=_('Écouter ici')),
+            halign=Gtk.Align.CENTER, margin_top=8, css_classes=['pill'])
+        self._listen_button.connect('clicked', self._on_listen_here_clicked)
+
         self._queue_title = Gtk.Label(
             label=_('File d’attente'), xalign=0, css_classes=['title-4'],
             margin_top=12)
@@ -402,6 +445,7 @@ class RemoteControlPage(_WatchingMixin, Gtk.Stack):
         box.append(self._seek_box)
         box.append(controls)
         box.append(self._volume_box)
+        box.append(self._listen_button)
         box.append(self._queue_title)
         box.append(self._queue_list)
         return Gtk.ScrolledWindow(
@@ -459,6 +503,7 @@ class RemoteControlPage(_WatchingMixin, Gtk.Stack):
         self._play_button.set_tooltip_text(_('Pause') if playing else _('Lecture'))
 
         self._seek_box.set_visible(track is not None)
+        self._listen_button.set_visible(track is not None)
         self._seek_scale.set_sensitive(self._can('seek') and state.duration_sec > 0
                                        if state is not None else False)
         self._update_position()
@@ -576,6 +621,11 @@ class RemoteControlPage(_WatchingMixin, Gtk.Stack):
 
     def _send(self, command):
         send_command(self._app, self, self._device_id, command)
+
+    def _on_listen_here_clicked(self, _button):
+        if self._device is not None:
+            listen_here(self._app, self, self._device,
+                        lambda: _listen_here_done(self))
 
     def _on_shuffle_toggled(self, button):
         if not self._updating:
