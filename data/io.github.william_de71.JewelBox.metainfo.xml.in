@@ -39,6 +39,11 @@
     entrée automatiquement, et la CI échoue si les deux divergent.
   -->
   <releases>
+    <release version="0.18.0" date="2026-11-01">
+      <description>
+        <p>Télécommande : piloter un autre lecteur JewelBox (le téléphone…) depuis le bureau, et « Lire sur… » pour lancer un album ou une playlist sur un autre appareil.</p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-10-30">
       <description>
         <p>Mix dynamique : « Ne plus jamais jouer » exclut un titre du mix, et les Préférences permettent de vider cette liste noire.</p>
