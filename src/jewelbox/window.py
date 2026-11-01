@@ -12,6 +12,8 @@ from jewelbox.ui.library import LibraryPage
 from jewelbox.ui.player_bar import PlayerBar
 from jewelbox.ui.playlist_detail import PlaylistDetailPage
 from jewelbox.ui.playlists import PlaylistsPage
+from jewelbox.ui.remote import (
+    RemoteControlPage, RemoteDevicesPage, RemoteWatcher)
 from jewelbox.ui.search import SearchPage
 from jewelbox.ui.smart_playlist_detail import SmartPlaylistDetailPage
 
@@ -81,6 +83,14 @@ class JewelboxWindow(Adw.ApplicationWindow):
         )
         menu_button.set_menu_model(self._build_main_menu())
         header_bar.pack_end(menu_button)
+        # Télécommande des autres lecteurs (le téléphone…) : un seul flux des
+        # lecteurs pour la fenêtre, ouvert tant qu'une de ses pages s'affiche.
+        self._remote_watcher = RemoteWatcher(self.get_application())
+        remote_button = Gtk.Button(
+            icon_name='audio-speakers-symbolic',
+            tooltip_text=_('Contrôler un autre appareil'))
+        remote_button.connect('clicked', lambda *_a: self.open_remote_devices())
+        header_bar.pack_end(remote_button)
 
         # NavigationView pour empiler la fiche album par-dessus les onglets
         # UNIQUEMENT — le menu (en-tête + ViewSwitcherBar) et le mini-lecteur
@@ -145,6 +155,10 @@ class JewelboxWindow(Adw.ApplicationWindow):
         # sur le téléphone entre-temps, la carte « Reprendre » de l'Accueil
         # doit le refléter.
         self.connect('notify::is-active', self._on_active_changed)
+
+        remote_action = Gio.SimpleAction.new('remote-devices', None)
+        remote_action.connect('activate', lambda *_a: self.open_remote_devices())
+        self.add_action(remote_action)
 
         # Ctrl+F : onglet Recherche, curseur dans le champ.
         search_action = Gio.SimpleAction.new('search', None)
@@ -274,6 +288,25 @@ class JewelboxWindow(Adw.ApplicationWindow):
         page.on_title_known = nav_page.set_title
         self._nav.push(nav_page)
 
+    def open_remote_devices(self):
+        """Empile la liste des lecteurs pilotables (depuis le grand lecteur
+        aussi : on le quitte d'abord, le retour ramène aux onglets)."""
+        self._close_full_player()
+        visible = self._nav.get_visible_page()
+        if visible is not None and visible.get_tag() == 'remote-devices':
+            return
+        page = RemoteDevicesPage(self.get_application(), self._remote_watcher)
+        page.on_device_activated = self._open_remote_device
+        self._nav.push(Adw.NavigationPage(
+            child=page, title=_('Appareils'), tag='remote-devices'))
+
+    def _open_remote_device(self, device_id: str):
+        page = RemoteControlPage(
+            self.get_application(), self._remote_watcher, device_id)
+        nav_page = Adw.NavigationPage(child=page, title=_('Télécommande'))
+        page.on_title_known = nav_page.set_title
+        self._nav.push(nav_page)
+
     def _pop_if_current(self, nav_page):
         # Ne dépile que si la fiche est bien en tête (l'utilisateur a pu
         # naviguer ailleurs entre-temps) ; pop() serait sinon un mauvais retour.
@@ -284,6 +317,7 @@ class JewelboxWindow(Adw.ApplicationWindow):
         menu = Gio.Menu()
         menu.append(_('Reprendre depuis un autre appareil…'),
                     'app.resume-from-device')
+        menu.append(_('Contrôler un autre appareil…'), 'win.remote-devices')
         menu.append(_('Préférences'), 'app.preferences')
         menu.append(_('Raccourcis clavier'), 'app.shortcuts')
         menu.append(_('À propos de JewelBox'), 'app.about')
