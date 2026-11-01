@@ -39,6 +39,11 @@
     entrée automatiquement, et la CI échoue si les deux divergent.
   -->
   <releases>
+    <release version="0.19.0" date="2026-11-01">
+      <description>
+        <p>« Écouter ici » : reprendre sur ce poste ce que joue un autre lecteur, à la seconde près, et le mettre en pause là-bas.</p>
+      </description>
+    </release>
     <release version="0.18.0" date="2026-11-01">
       <description>
         <p>Télécommande : piloter un autre lecteur JewelBox (le téléphone…) depuis le bureau, et « Lire sur… » pour lancer un album ou une playlist sur un autre appareil.</p>
