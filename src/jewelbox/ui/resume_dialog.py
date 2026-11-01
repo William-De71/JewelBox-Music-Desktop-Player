@@ -9,6 +9,7 @@ Code frontière (exclu de la couverture).
 """
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from gettext import gettext as _
 
@@ -16,11 +17,14 @@ from gi.repository import Adw, Gtk
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.queue_sync import resume_start
+from jewelbox.core.remote_controller import take_over_queue
 
 
-async def resume_device(app, device):
+async def resume_device(app, device, live_state=None):
     """Charge la file de device et la lance à la même piste, à la même
-    position. Rend 'ok', 'empty' (rien de jouable) ou 'error' (serveur)."""
+    position — celles de live_state (RemoteState, « Écouter ici ») quand il
+    correspond à la file. Rend 'ok', 'empty' (rien de jouable) ou 'error'
+    (serveur)."""
     client = app.get_client()
     playback = app.playback
     if client is None or playback is None:
@@ -29,6 +33,7 @@ async def resume_device(app, device):
         queue = await client.device_queue(device.device_id)
     except ApiError:
         return 'error'
+    queue = take_over_queue(queue, live_state, time.time())
     start = resume_start([t.has_file for t in queue.tracks],
                          queue.current_index)
     if start is None:
