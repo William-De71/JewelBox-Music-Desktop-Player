@@ -168,6 +168,11 @@ class PlaybackSession:
     def has_item(self) -> bool:
         return self._queue.state().has_item
 
+    @property
+    def resume_pending(self) -> bool:
+        """Une file restaurée attend encore qu'on appuie sur lecture."""
+        return self._resume_pending
+
     # ── Démarrage d'une lecture ──────────────────────────────────────────────
 
     def play_album(self, album, start_track_id: int):

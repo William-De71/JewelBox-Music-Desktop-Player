@@ -43,6 +43,13 @@ class QueueSyncPlanner:
         pistes n'ont pas changé (sa source, elle, a changé)."""
         self._track_ids = ()
 
+    def prime(self, track_ids, current_index):
+        """Le serveur a déjà cette file (restaurée au démarrage) : ne pas la
+        renvoyer, ce qui la daterait d'à l'instant et masquerait la reprise
+        depuis les autres appareils. Parité avec prime() côté Android."""
+        self._track_ids = tuple(track_ids)
+        self._index = -1 if current_index is None else current_index
+
     def update(self, track_ids, current_index, position_sec, playing,
                now) -> SyncAction | None:
         """Nouvel état de la file ; rend l'appel à faire, ou None."""

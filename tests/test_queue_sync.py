@@ -13,6 +13,16 @@ def test_new_queue_is_saved_whole():
     assert action == SyncAction('save', (1, 2, 3), 1, 12.5)
 
 
+def test_primed_queue_is_not_sent_back_until_something_happens():
+    planner = QueueSyncPlanner()
+    planner.prime([1, 2], 1)
+    assert planner.update([1, 2], 1, 40, False, now=0) is None
+    assert planner.update([1, 2], 0, 0, False, now=1) == SyncAction(
+        'state', current_index=0, position_sec=0)
+    assert planner.update([3], 0, 0, False, now=2) == SyncAction(
+        'save', (3,), 0, 0)
+
+
 def test_resend_forces_a_full_save_of_the_same_tracks():
     planner = QueueSyncPlanner()
     planner.update([1, 2], 0, 0, False, now=0)
