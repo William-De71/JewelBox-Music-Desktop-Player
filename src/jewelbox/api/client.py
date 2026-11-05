@@ -311,6 +311,15 @@ class JewelBoxClient:
         core.lyrics.parse_lyrics."""
         return await self._get(f'/api/player/tracks/{track_id}/lyrics')
 
+    async def save_lyrics(self, track_id: int, text: str):
+        """Enregistre les paroles saisies ; rend la réponse comme lyrics()."""
+        return await self._put(f'/api/player/tracks/{track_id}/lyrics',
+                               {'text': text})
+
+    async def delete_lyrics(self, track_id: int) -> None:
+        """Retire les paroles saisies (retour au .lrc ou à LRCLIB)."""
+        await self._delete(f'/api/player/tracks/{track_id}/lyrics')
+
     async def track(self, track_id: int):
         """Une piste au format QueueTrack (serveur >= 1.18)."""
         return parsing.parse_queue_track(

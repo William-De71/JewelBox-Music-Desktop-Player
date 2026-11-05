@@ -23,7 +23,12 @@ class Lyrics:
     lines: tuple = ()            # LyricLine, triées ; vide sans synchro
     plain: str | None = None
     instrumental: bool = False
-    source: str | None = None    # 'file', 'lrclib' ou None
+    source: str | None = None    # 'custom', 'file', 'lrclib' ou None
+    text: str | None = None      # texte saisi tel quel (source 'custom')
+
+    @property
+    def custom(self) -> bool:
+        return self.source == 'custom'
 
     @property
     def synced(self) -> bool:
@@ -47,7 +52,9 @@ def parse_lyrics(payload) -> Lyrics:
                 continue
     lines.sort(key=lambda line: line.time)
     plain = payload.get('plain')
+    text = payload.get('text')
     return Lyrics(
+        text=text if isinstance(text, str) else None,
         lines=tuple(lines),
         plain=plain if isinstance(plain, str) and plain.strip() else None,
         instrumental=bool(payload.get('instrumental')),

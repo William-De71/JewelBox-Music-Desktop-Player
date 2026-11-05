@@ -36,8 +36,12 @@ class QueueSync:
         self._pending_save = None   # dernière SyncAction 'save' en attente
         self._save_source = 0
         self._source_name = None    # source de la file en cours (affichage)
+        self._prime_next = False
 
     def start(self):
+        # add_listener envoie aussitôt l'état actuel : une file restaurée doit
+        # être reconnue à ce premier état, et non publiée comme nouvelle.
+        self._prime_next = self._playback.resume_pending
         self._playback.add_listener(self._on_playback_state)
 
     def stop(self):
@@ -45,6 +49,12 @@ class QueueSync:
         self._cancel_save()
 
     def _on_playback_state(self, state):
+        if self._prime_next:
+            self._prime_next = False
+            self._source_name = state.source_name
+            self._planner.prime(
+                [item.track_id for item in state.queue_items],
+                state.queue_index)
         if state.source_name != self._source_name:
             # Même pistes, autre source (reprise d'une file identique à celle
             # restaurée au démarrage) : le serveur doit apprendre la nouvelle.

@@ -18,6 +18,14 @@ def test_parse_synced_lines_sorted_bad_ones_skipped():
     assert lyrics.synced and lyrics.source == 'lrclib' and not lyrics.empty
 
 
+def test_parse_entered_lyrics_keeps_the_text_for_editing():
+    lyrics = parse_lyrics({
+        'source': 'custom', 'synced': True, 'plain': 'One',
+        'lines': [{'time': 1, 'text': 'One'}], 'text': '[00:01.00]One'})
+    assert lyrics.custom and lyrics.text == '[00:01.00]One'
+    assert not parse_lyrics({'source': 'lrclib', 'plain': 'Words'}).custom
+
+
 def test_parse_plain_instrumental_and_nothing():
     assert parse_lyrics({'synced': False, 'plain': 'Words'}).plain == 'Words'
     assert parse_lyrics({'instrumental': True}).instrumental

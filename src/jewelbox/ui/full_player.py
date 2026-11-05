@@ -8,12 +8,12 @@ avec ses deux temps et enfin la rangée de contrôles (aléatoire · précédent
 lecture · suivant · répétition). Ouvert en cliquant sur le mini-lecteur ;
 empilé par-dessus les onglets dans le NavigationView.
 
-Sous les contrôles, la file d'attente : la liste des pistes en file avec la
-piste courante mise en avant, dépliable et repliable. Elle évite d'avoir à
-retrouver l'album dans la bibliothèque pour savoir ce qui suit — un clic sur
-une ligne saute directement à cette piste. La pochette, elle, est cliquable :
-elle ramène à la fiche d'où vient la lecture (album, playlist ou liste
-intelligente).
+Le titre, la barre et les contrôles restent toujours à l'écran : seule la
+zone du haut change, la pochette laissant sa place aux paroles à la demande.
+La file d'attente occupe un panneau à droite (en surimpression si la fenêtre
+est étroite) : un clic sur une ligne saute directement à cette piste. La
+pochette, elle, est cliquable : elle ramène à la fiche d'où vient la lecture
+(album, playlist ou liste intelligente).
 
 Code frontière (exclu de la couverture) : comme le mini-lecteur, cette page
 ne fait qu'afficher un PlaybackUiState et déléguer chaque action à
@@ -24,7 +24,7 @@ seek que la barre de lecture (voir player_bar.py).
 import asyncio
 from gettext import gettext as _
 
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango
+from gi.repository import Adw, Gdk, GLib, GObject, Gtk, Pango
 
 from jewelbox.api.client import ApiError
 from jewelbox.core.formats import format_duration
@@ -32,6 +32,10 @@ from jewelbox.core.lyrics import current_line_index, parse_lyrics
 from jewelbox.ui.shortcuts import with_shortcut
 from jewelbox.ui.track_menu import menu_button
 from jewelbox.ui.add_to_playlist import present_add_to_playlist
+
+
+# En dessous, le lecteur et la file n'ont plus la place de cohabiter.
+_QUEUE_BESIDE_MIN_WIDTH = '860sp'
 
 
 class FullPlayerPage(Gtk.Box):
@@ -53,6 +57,7 @@ class FullPlayerPage(Gtk.Box):
         self._queue_signature = None
         self._queue_rows = []          # une Gtk.ListBoxRow par piste, dans l'ordre
         self._queue_index = None
+        self._has_queue = False        # plus d'une piste : la file a un intérêt
         # Dernier état reçu : le bouton « Aller à… » y relit la source au clic
         # plutôt que de dupliquer source_type/source_id en attributs.
         self._last_state = None
@@ -67,26 +72,37 @@ class FullPlayerPage(Gtk.Box):
         self.on_open_smart_playlist = None
 
         content = self._build_content()
-        # Plafonné et centré horizontalement : sur une fenêtre large, la
-        # pochette et les contrôles restent groupés au milieu (colonne d'au
-        # plus 560px) plutôt que de s'étirer sur toute la largeur — parité avec
-        # la colonne à marges du grand lecteur mobile. Adw.Clamp s'en charge.
-        #
-        # Verticalement, en revanche, le contenu est aligné en HAUT : depuis
-        # que la file d'attente se déplie sous les contrôles, un centrage ferait
-        # remonter puis redescendre tout le lecteur à chaque bascule. Aligné en
-        # haut, la pochette et les contrôles ne bougent plus, la file pousse
-        # simplement la page vers le bas et le défilement prend le relais.
-        content.set_valign(Gtk.Align.START)
-        content.set_vexpand(True)
+        # Plafonné et centré horizontalement : sur une fenêtre large, le lecteur
+        # reste groupé (colonne d'au plus 560px) plutôt que de s'étirer.
         clamp = Adw.Clamp(
             child=content, maximum_size=560, tightening_threshold=480,
-            margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
+            margin_start=24, margin_end=24, margin_top=16, margin_bottom=16)
+        # Le défilement ne sert qu'aux très petites fenêtres : sinon la colonne
+        # remplit exactement la hauteur et les contrôles restent visibles.
         scroller = Gtk.ScrolledWindow(
             child=clamp, hscrollbar_policy=Gtk.PolicyType.NEVER,
             vexpand=True)
-        self._scroller = scroller
-        self.append(scroller)
+        self._split = Adw.OverlaySplitView(
+            content=scroller, sidebar=self._build_queue_panel(),
+            sidebar_position=Gtk.PackType.END, show_sidebar=False,
+            min_sidebar_width=300, max_sidebar_width=420,
+            sidebar_width_fraction=0.35)
+        self._queue_toggle.bind_property(
+            'active', self._split, 'show-sidebar',
+            GObject.BindingFlags.BIDIRECTIONAL
+            | GObject.BindingFlags.SYNC_CREATE)
+        self._split.connect('notify::show-sidebar', self._on_queue_shown)
+
+        # Étroit : la file passe par-dessus le lecteur, et seulement à la demande.
+        layout = Adw.BreakpointBin(
+            child=self._split, width_request=360, height_request=200,
+            vexpand=True)
+        breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(
+            f'max-width: {_QUEUE_BESIDE_MIN_WIDTH}'))
+        breakpoint.add_setter(self._split, 'collapsed', True)
+        breakpoint.add_setter(self._split, 'show-sidebar', False)
+        layout.add_breakpoint(breakpoint)
+        self.append(layout)
 
         if application.playback is not None:
             application.playback.add_listener(self._on_state)
@@ -98,16 +114,46 @@ class FullPlayerPage(Gtk.Box):
 
     def _build_content(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        box.append(self._build_cover())
-        box.append(Gtk.Box(height_request=24))
+        box.append(self._build_stage())
+        box.append(Gtk.Box(height_request=16))
         box.append(self._build_titles())
         box.append(Gtk.Box(height_request=20))
         box.append(self._build_seek())
         box.append(Gtk.Box(height_request=12))
         box.append(self._build_controls())
+        box.append(self._build_actions())
+        return box
+
+    def _build_stage(self):
+        """La zone du haut, seule à changer de taille : pochette ou paroles."""
+        self._stage = Gtk.Stack(
+            vexpand=True, height_request=160,
+            transition_type=Gtk.StackTransitionType.CROSSFADE,
+            transition_duration=150)
+        self._stage.add_named(self._build_cover(), 'cover')
+        self._stage.add_named(self._build_lyrics(), 'lyrics')
+        return self._stage
+
+    def _build_actions(self):
+        """Sous les contrôles : ce qui s'affiche à côté du lecteur, et la
+        minuterie. Les libellés rétrécissent sur une fenêtre étroite."""
+        self._lyrics_toggle = Gtk.ToggleButton(
+            css_classes=['flat'], tooltip_text=_('Paroles'),
+            child=Adw.ButtonContent(
+                icon_name='format-justify-center-symbolic',
+                label=_('Paroles'), can_shrink=True))
+        self._lyrics_toggle.connect('toggled', self._on_lyrics_toggled)
+
+        self._queue_toggle_content = Adw.ButtonContent(
+            icon_name='view-list-symbolic', can_shrink=True)
+        self._queue_toggle = Gtk.ToggleButton(
+            css_classes=['flat'], tooltip_text=_('File d’attente'),
+            child=self._queue_toggle_content, visible=False)
+
+        box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER, margin_top=8)
+        box.append(self._lyrics_toggle)
         box.append(self._build_sleep_timer())
-        box.append(self._build_queue())
-        box.append(self._build_lyrics())
+        box.append(self._queue_toggle)
         return box
 
     # ── Minuterie de sommeil ─────────────────────────────────────────────────
@@ -130,8 +176,6 @@ class FullPlayerPage(Gtk.Box):
         self._sleep_button = menu_button(
             entries, icon_name='weather-clear-night-symbolic',
             label=_('Minuterie'), tooltip=_('Minuterie de sommeil'))
-        self._sleep_button.set_halign(Gtk.Align.CENTER)
-        self._sleep_button.set_margin_top(8)
         # Le libellé est le 2e enfant du contenu posé par menu_button.
         self._sleep_label = self._sleep_button.get_child().get_last_child()
         return self._sleep_button
@@ -158,32 +202,20 @@ class FullPlayerPage(Gtk.Box):
     # ── Grande pochette ──────────────────────────────────────────────────────
 
     def _build_cover(self):
-        # Pochette carrée RESPONSIVE : elle grandit jusqu'à un plafond mais
-        # rétrécit avec la fenêtre — pas de width/height_request fixe, qui
-        # ferait un plancher rigide débordant hors de l'écran quand la fenêtre
-        # est petite (bug observé : pochette coupée, contrôles poussés dehors).
-        #
-        # L'AspectFrame (ratio 1, obey_child=False) dérive sa hauteur de sa
-        # largeur : quand la largeur est contrainte (fenêtre étroite ou plafond
-        # du Clamp), la hauteur suit, donc la pochette reste carrée sans jamais
-        # forcer une hauteur minimale. Un Adw.Clamp interne plafonne la largeur
-        # à 440 sur grand écran ; en dessous, tout se réduit proportionnellement.
+        # Pochette carrée RESPONSIVE : l'AspectFrame loge le plus grand carré
+        # possible dans la zone du haut, en largeur comme en hauteur, donc la
+        # pochette ne pousse jamais les contrôles hors de l'écran. Il entoure le
+        # bouton pour que l'arrondi et le clic suivent la pochette elle-même.
         #
         # Le placeholder disque reste visible SOUS la Picture tant qu'aucune
-        # image n'est chargée : l'AspectFrame est l'enfant PRINCIPAL de
-        # l'Overlay (il dimensionne), le placeholder est l'overlay centré. En
-        # faire l'enfant principal écraserait tout à la taille de l'icône.
+        # image n'est chargée : il est l'overlay centré, la Picture dimensionne.
         self._cover = Gtk.Picture(content_fit=Gtk.ContentFit.COVER)
-        aspect = Gtk.AspectFrame(
-            ratio=1.0, obey_child=False, hexpand=True, vexpand=False,
-            overflow=Gtk.Overflow.HIDDEN, child=self._cover)
         self._cover_placeholder = Gtk.Image(
             icon_name='media-optical-symbolic', pixel_size=128,
             css_classes=['dim-label'],
             halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
 
-        overlay = Gtk.Overlay(hexpand=True)
-        overlay.set_child(aspect)
+        overlay = Gtk.Overlay(overflow=Gtk.Overflow.HIDDEN, child=self._cover)
         overlay.add_overlay(self._cover_placeholder)
 
         # La pochette EST le lien vers l'album (ou la playlist) d'où vient la
@@ -191,17 +223,13 @@ class FullPlayerPage(Gtk.Box):
         # texte de plus sous les contrôles. Même motif que la ligne « Derniers
         # ajouts » de l'accueil — un Gtk.Button dépouillé par
         # .jewelbox-cover-button, dont la pochette est l'unique enfant.
-        #
-        # .jewelbox-cover passe ici (du parent Overlay au bouton) pour que
-        # l'arrondi et le rognage suivent la surface réellement cliquée.
         self._cover_button = Gtk.Button(
-            child=overlay, hexpand=True, can_shrink=True,
+            child=overlay, can_shrink=True,
             css_classes=['flat', 'jewelbox-cover-button', 'jewelbox-cover'])
         self._cover_button.connect('clicked', self._on_open_source)
 
-        return Adw.Clamp(
-            child=self._cover_button, maximum_size=440,
-            tightening_threshold=440, halign=Gtk.Align.CENTER)
+        return Gtk.AspectFrame(
+            ratio=1.0, obey_child=False, child=self._cover_button)
 
     # ── Titre · artiste · album (titre + cœur sur la même ligne) ─────────────
 
@@ -328,115 +356,111 @@ class FullPlayerPage(Gtk.Box):
 
     # ── File d'attente + retour à la source ──────────────────────────────────
 
-    def _build_queue(self):
-        """La file en cours, dépliable sous les contrôles.
-
-        Repliée par défaut : le lecteur garde son allure « pochette + contrôles »
-        habituelle, et la file ne s'ouvre que si on la demande. Le bouton
-        d'en-tête porte le nombre de pistes, pour savoir ce qu'on va ouvrir
-        avant de cliquer.
-        """
-        self._queue_toggle = Gtk.ToggleButton(css_classes=['flat'])
-        self._queue_toggle_label = Gtk.Label()
-        self._queue_toggle_arrow = Gtk.Image(icon_name='pan-down-symbolic')
-        toggle_box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
-        toggle_box.append(self._queue_toggle_label)
-        toggle_box.append(self._queue_toggle_arrow)
-        self._queue_toggle.set_child(toggle_box)
-        self._queue_toggle.connect('toggled', self._on_queue_toggled)
-
+    def _build_queue_panel(self):
+        """La file en cours, dans le panneau de droite."""
+        self._queue_title = Gtk.Label(
+            xalign=0, css_classes=['heading'], ellipsize=Pango.EllipsizeMode.END,
+            margin_top=16, margin_bottom=8, margin_start=16, margin_end=16)
         self._queue_box = Gtk.ListBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            css_classes=['boxed-list'], margin_top=8)
+            css_classes=['boxed-list'], valign=Gtk.Align.START,
+            margin_start=12, margin_end=12, margin_bottom=12)
         self._queue_box.connect('row-activated', self._on_queue_row_activated)
+        self._queue_scroller = Gtk.ScrolledWindow(
+            child=self._queue_box, hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vexpand=True)
+        panel = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, css_classes=['background'])
+        panel.append(self._queue_title)
+        panel.append(self._queue_scroller)
+        return panel
 
-        self._queue_revealer = Gtk.Revealer(
-            child=self._queue_box,
-            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
-
-        self._queue_section = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0,
-            margin_top=16, visible=False)
-        self._queue_section.append(self._queue_toggle)
-        self._queue_section.append(self._queue_revealer)
-        return self._queue_section
-
-    def _on_queue_toggled(self, button):
-        expanded = button.get_active()
-        self._queue_revealer.set_reveal_child(expanded)
-        self._queue_toggle_arrow.set_from_icon_name(
-            'pan-up-symbolic' if expanded else 'pan-down-symbolic')
-        if expanded:
-            # Ouvrir la file doit montrer où on en est : on amène la piste
-            # courante à l'écran une fois le dépliage terminé (le Revealer
-            # anime, la ligne n'a pas encore sa position finale avant).
+    def _on_queue_shown(self, *_args):
+        # Montrer où on en est, une fois le panneau en place (il est animé).
+        if self._split.get_show_sidebar():
             GLib.timeout_add(250, self._scroll_to_current)
 
     def _scroll_to_current(self):
         row = (self._queue_rows[self._queue_index]
                if self._queue_index is not None
                and 0 <= self._queue_index < len(self._queue_rows) else None)
-        # grab_focus() sur une ligne d'une liste défilante demande au
-        # ScrolledWindow ancêtre de la rendre visible — plus simple et plus sûr
-        # que de calculer nous-mêmes une position d'ajustement.
-        if row is not None and self._queue_revealer.get_reveal_child():
-            row.grab_focus()
+        if row is not None and self._split.get_show_sidebar():
+            self._center_in(self._queue_scroller, row)
         return False  # one-shot
+
+    @staticmethod
+    def _center_in(scroller, widget):
+        """Centre un widget dans sa liste défilante, sans voler le focus."""
+        # Ces coordonnées sont celles de la zone visible, qui suit le
+        # défilement : la position dans le contenu s'obtient en y ajoutant la
+        # valeur courante. Sans cela, chaque calcul tombe à côté et la liste
+        # fait des allers-retours.
+        ok, bounds = widget.compute_bounds(scroller.get_child())
+        if not ok:
+            return
+        adjustment = scroller.get_vadjustment()
+        target = (adjustment.get_value() + bounds.get_y()
+                  + (bounds.get_height() - adjustment.get_page_size()) / 2)
+        upper = adjustment.get_upper() - adjustment.get_page_size()
+        # Une seule animation à la fois par liste : deux en cours se disputeraient
+        # la position et feraient trembler le texte.
+        previous = getattr(scroller, 'scroll_animation', None)
+        if previous is not None:
+            previous.pause()
+        scroller.scroll_animation = Adw.TimedAnimation(
+            widget=scroller, value_from=adjustment.get_value(),
+            value_to=max(0.0, min(upper, target)), duration=300,
+            target=Adw.PropertyAnimationTarget.new(adjustment, 'value'))
+        scroller.scroll_animation.play()
 
     # ── Paroles ──────────────────────────────────────────────────────────────
 
     def _build_lyrics(self):
-        """Les paroles de la piste en cours, dépliables sous la file comme
-        elle. Synchronisées, elles suivent la musique (la ligne chantée en
-        avant, amenée à l'écran) et un clic sur une ligne y saute ; sinon le
-        texte brut. Demandées au serveur seulement une fois dépliées."""
+        """Les paroles de la piste en cours, à la place de la pochette.
+        Synchronisées, elles suivent la musique (la ligne chantée en avant,
+        amenée au centre) et un clic sur une ligne y saute ; sinon le texte
+        brut. Demandées au serveur seulement une fois affichées."""
         self._lyrics_track_id = None   # piste des paroles demandées / affichées
         self._lyrics = None
         self._lyrics_rows = []
         self._lyrics_index = -1
 
-        self._lyrics_toggle = Gtk.ToggleButton(css_classes=['flat'])
-        self._lyrics_toggle_arrow = Gtk.Image(icon_name='pan-down-symbolic')
-        toggle_box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
-        toggle_box.append(Gtk.Label(label=_('Paroles')))
-        toggle_box.append(self._lyrics_toggle_arrow)
-        self._lyrics_toggle.set_child(toggle_box)
-        self._lyrics_toggle.connect('toggled', self._on_lyrics_toggled)
-
         self._lyrics_message = Gtk.Label(
             wrap=True, justify=Gtk.Justification.CENTER, selectable=True,
-            css_classes=['dim-label'], margin_top=8)
+            css_classes=['dim-label'], margin_top=8, margin_bottom=8)
         self._lyrics_list = Gtk.ListBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            css_classes=['background'], margin_top=8, visible=False)
+            css_classes=['background'], visible=False)
         self._lyrics_list.connect('row-activated', self._on_lyric_activated)
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content.append(self._lyrics_message)
-        content.append(self._lyrics_list)
-        self._lyrics_revealer = Gtk.Revealer(
-            child=content,
-            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
-
-        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=8)
-        section.append(self._lyrics_toggle)
-        section.append(self._lyrics_revealer)
-        return section
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        text.append(self._lyrics_message)
+        text.append(self._lyrics_list)
+        self._lyrics_scroller = Gtk.ScrolledWindow(
+            child=text, hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+        self._lyrics_edit = Gtk.Button(
+            css_classes=['flat'], halign=Gtk.Align.CENTER, margin_top=4,
+            visible=False)
+        self._lyrics_edit.connect('clicked', self._on_lyrics_edit_clicked)
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        panel.append(self._lyrics_scroller)
+        panel.append(self._lyrics_edit)
+        return panel
 
     def _on_lyrics_toggled(self, button):
         expanded = button.get_active()
-        self._lyrics_revealer.set_reveal_child(expanded)
-        self._lyrics_toggle_arrow.set_from_icon_name(
-            'pan-up-symbolic' if expanded else 'pan-down-symbolic')
+        self._stage.set_visible_child_name('lyrics' if expanded else 'cover')
         if expanded and self._last_state is not None:
             self._update_lyrics(self._last_state)
+            GLib.timeout_add(250, self._scroll_to_lyric)
 
     def _update_lyrics(self, state):
         track_id = state.current_track_id
         if track_id != self._lyrics_track_id:
             self._lyrics_track_id = None
             self._lyrics = None
+            self._lyrics_edit.set_visible(False)
             self._show_lyrics_message('')
-            if track_id is not None and self._lyrics_revealer.get_reveal_child():
+            if track_id is not None and self._lyrics_toggle.get_active():
                 self._lyrics_track_id = track_id
                 self._show_lyrics_message(_('Recherche des paroles…'))
                 asyncio.get_event_loop_policy().get_event_loop().create_task(
@@ -456,9 +480,15 @@ class FullPlayerPage(Gtk.Box):
                 self._show_lyrics_message(
                     _('Paroles indisponibles (serveur injoignable ou antérieur à la 1.20).'))
             return
-        if self._lyrics_track_id != track_id:
-            return
+        if self._lyrics_track_id == track_id:
+            self._show_lyrics(lyrics)
+
+    def _show_lyrics(self, lyrics):
         self._lyrics = lyrics
+        self._lyrics_edit.set_label(
+            _('Modifier les paroles') if lyrics.custom
+            else _('Saisir les paroles'))
+        self._lyrics_edit.set_visible(True)
         if lyrics.instrumental:
             self._show_lyrics_message(_('Morceau instrumental.'))
         elif lyrics.synced:
@@ -467,6 +497,87 @@ class FullPlayerPage(Gtk.Box):
             self._show_lyrics_message(lyrics.plain, dim=False)
         else:
             self._show_lyrics_message(_('Pas de paroles trouvées pour ce titre.'))
+
+    def _on_lyrics_edit_clicked(self, _button):
+        """Saisie des paroles de la piste en cours : le texte du serveur sert
+        de base s'il y en a un, pour corriger plutôt que tout recoller."""
+        track_id, lyrics = self._lyrics_track_id, self._lyrics
+        if track_id is None or lyrics is None:
+            return
+        buffer = Gtk.TextBuffer()
+        buffer.set_text(lyrics.text or lyrics.plain or '')
+        scrolled = Gtk.ScrolledWindow(
+            child=Gtk.TextView(
+                buffer=buffer, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                top_margin=8, bottom_margin=8, left_margin=8, right_margin=8),
+            min_content_height=260, css_classes=['card'])
+        title = self._last_state.title if self._last_state else None
+        dialog = Adw.AlertDialog(
+            heading=title or _('Paroles'),
+            body=_('Colle le texte des paroles. Au format LRC, avec les '
+                   'horodatages, elles suivront la musique.'),
+            extra_child=scrolled)
+        dialog.add_response('cancel', _('Annuler'))
+        if lyrics.custom:
+            dialog.add_response('remove', _('Retirer'))
+            dialog.set_response_appearance(
+                'remove', Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.add_response('save', _('Enregistrer'))
+        dialog.set_response_appearance(
+            'save', Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_close_response('cancel')
+
+        def sync_save(*_args):
+            start, end = buffer.get_bounds()
+            dialog.set_response_enabled(
+                'save', bool(buffer.get_text(start, end, False).strip()))
+
+        buffer.connect('changed', sync_save)
+        sync_save()
+        dialog.connect('response', self._on_lyrics_edit_response,
+                       track_id, buffer)
+        dialog.present(self.get_root())
+
+    def _on_lyrics_edit_response(self, _dialog, response, track_id, buffer):
+        start, end = buffer.get_bounds()
+        text = buffer.get_text(start, end, False)
+        if response == 'save':
+            task = self._save_lyrics(track_id, text)
+        elif response == 'remove':
+            task = self._remove_lyrics(track_id)
+        else:
+            return
+        asyncio.get_event_loop_policy().get_event_loop().create_task(task)
+
+    def _lyrics_save_failed(self):
+        root = self.get_root()
+        if root is not None:
+            root.show_toast(_("Paroles non enregistrées : serveur injoignable "
+                              "ou pas à jour."))
+
+    async def _save_lyrics(self, track_id, text):
+        client = self._app.get_client()
+        try:
+            if client is None:
+                raise ApiError('no server')
+            lyrics = parse_lyrics(await client.save_lyrics(track_id, text))
+        except ApiError:
+            self._lyrics_save_failed()
+            return
+        if self._lyrics_track_id == track_id:
+            self._show_lyrics(lyrics)
+
+    async def _remove_lyrics(self, track_id):
+        client = self._app.get_client()
+        try:
+            if client is None:
+                raise ApiError('no server')
+            await client.delete_lyrics(track_id)
+        except ApiError:
+            self._lyrics_save_failed()
+            return
+        if self._lyrics_track_id == track_id:
+            await self._load_lyrics(track_id)
 
     def _show_lyrics_message(self, text, dim=True):
         while (row := self._lyrics_list.get_row_at_index(0)) is not None:
@@ -490,9 +601,12 @@ class FullPlayerPage(Gtk.Box):
             self._lyrics_list.append(row)
             self._lyrics_rows.append(row)
         self._lyrics_list.set_visible(True)
+        self._lyrics_scroller.get_vadjustment().set_value(0)
         if self._last_state is not None:
             self._highlight_lyric(current_line_index(
                 lines, self._last_state.position_seconds or 0.0))
+        # Les nouvelles lignes n'ont pas encore de position à l'écran.
+        GLib.timeout_add(100, self._scroll_to_lyric)
 
     def _highlight_lyric(self, index):
         if index == self._lyrics_index:
@@ -502,18 +616,13 @@ class FullPlayerPage(Gtk.Box):
                 self._lyrics_rows[i].get_child().set_css_classes(
                     ['heading'] if i == index else ['dim-label'])
         self._lyrics_index = index
-        if 0 <= index < len(self._lyrics_rows) and self._lyrics_revealer.get_reveal_child():
-            self._scroll_into_view(self._lyrics_rows[index])
+        self._scroll_to_lyric()
 
-    def _scroll_into_view(self, widget):
-        """Centre la ligne chantée dans la page, sans voler le focus."""
-        ok, bounds = widget.compute_bounds(self._scroller.get_child())
-        if not ok:
-            return
-        adjustment = self._scroller.get_vadjustment()
-        target = bounds.get_y() + bounds.get_height() / 2 - adjustment.get_page_size() / 2
-        upper = adjustment.get_upper() - adjustment.get_page_size()
-        adjustment.set_value(max(0.0, min(upper, target)))
+    def _scroll_to_lyric(self):
+        index = self._lyrics_index
+        if 0 <= index < len(self._lyrics_rows) and self._lyrics_toggle.get_active():
+            self._center_in(self._lyrics_scroller, self._lyrics_rows[index])
+        return False  # one-shot quand il passe par un délai
 
     def _on_lyric_activated(self, _box, row):
         if self._app.playback is not None and hasattr(row, 'lyric_time'):
@@ -705,18 +814,23 @@ class FullPlayerPage(Gtk.Box):
         if signature != self._queue_signature:
             self._queue_signature = signature
             self._build_queue_rows(state.queue_items)
-            # Le compteur n'a de sens qu'avec plus d'une piste ; sous ce seuil
-            # la section entière disparaît (une file d'une seule piste n'a rien
-            # à montrer que le lecteur n'affiche déjà).
-            self._queue_toggle_label.set_label(
-                _('File d’attente ({count})').format(count=len(signature)))
-            self._queue_toggle.set_visible(len(signature) > 1)
-            if len(signature) <= 1 and self._queue_toggle.get_active():
-                self._queue_toggle.set_active(False)
+            title = _('File d’attente ({count})').format(count=len(signature))
+            self._queue_title.set_label(title)
+            self._queue_toggle_content.set_label(title)
+        # Une file d'une seule piste n'a rien à montrer que le lecteur n'affiche
+        # déjà. Dès qu'elle s'allonge, elle s'ouvre si la place le permet.
+        has_queue = len(signature) > 1
+        if has_queue != self._has_queue:
+            self._has_queue = has_queue
+            self._queue_toggle.set_visible(has_queue)
+            self._split.set_show_sidebar(
+                has_queue and not self._split.get_collapsed())
+        index_changed = state.queue_index != self._queue_index
         self._queue_index = state.queue_index
         self._update_queue_highlight(state)
         self._update_cover_link(state)
-        self._queue_section.set_visible(self._queue_toggle.get_visible())
+        if index_changed:
+            GLib.timeout_add(100, self._scroll_to_current)
 
     def _on_state(self, state):
         if not state.has_item:
