@@ -39,6 +39,11 @@
     entrée automatiquement, et la CI échoue si les deux divergent.
   -->
   <releases>
+    <release version="0.21.0" date="2026-11-08">
+      <description>
+        <p>Fiche album : nouveau bouton « Lire » pour lancer l'album tout de suite.</p>
+      </description>
+    </release>
     <release version="0.20.0" date="2026-11-05">
       <description>
         <p>Lecteur réorganisé : file d'attente sur le côté, paroles à la place de la pochette, suivi synchronisé corrigé et saisie des paroles.</p>
