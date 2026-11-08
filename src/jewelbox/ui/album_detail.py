@@ -118,8 +118,14 @@ class AlbumDetailPage(Gtk.Stack):
         header.append(self._meta_label)
         header.append(self._notes_label)
 
-        # Actions sur l'album entier : radio autour de lui, et le menu
+        # Actions sur l'album entier : le lire tout de suite (depuis la
+        # première piste jouable), radio autour de lui, et le menu
         # « Ajouter » (lire ensuite, file d'attente, playlist).
+        play_album = Gtk.Button(css_classes=['pill', 'suggested-action'],
+                                tooltip_text=_('Lire l’album'))
+        play_album.set_child(Adw.ButtonContent(
+            icon_name='media-playback-start-symbolic', label=_('Lire')))
+        play_album.connect('clicked', lambda *_a: self._play_album())
         radio = Gtk.Button(css_classes=['pill'],
                            tooltip_text=_('Radio autour de cet album'))
         radio.set_child(Adw.ButtonContent(
@@ -136,6 +142,7 @@ class AlbumDetailPage(Gtk.Stack):
             tooltip=_('Ajouter l’album à la file ou à une playlist'))
         add_album.add_css_class('pill')
         actions = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER, margin_top=8)
+        actions.append(play_album)
         actions.append(radio)
         actions.append(add_album)
         actions.append(play_on_button(
@@ -319,6 +326,14 @@ class AlbumDetailPage(Gtk.Stack):
             playback.toggle_play_pause()
         else:
             playback.play_album(album, track_id)
+
+    def _play_album(self):
+        """Remplace la file par l'album et le lance depuis la première piste
+        jouable (play_album retombe sur l'index 0 pour un id absent)."""
+        playback = self._app.playback
+        if playback is None or self._album is None:
+            return
+        playback.play_album(self._album, None)
 
     def _enqueue(self, track_id, play_next):
         """Lire ensuite / ajouter à la file : une piste, ou l'album entier
