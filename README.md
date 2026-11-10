@@ -11,7 +11,7 @@ serveur sur le réseau local. Parité fonctionnelle visée avec le
 - **UI** : GTK4 + libadwaita (PyGObject), fichiers UI en Blueprint (`.blp`)
 - **Audio** : GStreamer `playbin3` (seek HTTP via Range requests, gapless)
 - **HTTP** : libsoup 3 + asyncio sur la boucle GLib (`gi.events`)
-- **Intégrations desktop** : MPRIS (D-Bus), découverte mDNS via Avahi
+- **Intégrations desktop** : MPRIS (D-Bus)
 - **Réglages** : GSettings — **Build** : Meson — **Distribution** : Flatpak
   (`org.gnome.Platform` 50)
 
@@ -80,7 +80,6 @@ src/jewelbox/
 ├── core/                  # logique pure testable : scrobbler, mixsync,
 │                          #   file persistée, formats, réglages
 ├── playback/              # playbin3, file de lecture, MPRIS
-├── discovery/             # découverte Avahi (_jewelbox._tcp)
 └── ui/                    # pages et widgets (Python + Blueprint)
 ```
 
@@ -89,4 +88,5 @@ src/jewelbox/
 Livraison par phases (chaque phase = commit fonctionnel) : squelette →
 client API + réglages → bibliothèque → lecture audio → player UI + reprise →
 accueil + recherche → playlists → smart playlists + mix dynamique →
-scrobbling Last.fm → MPRIS → découverte mDNS → finitions.
+scrobbling Last.fm → MPRIS → finitions. La découverte mDNS du serveur n'est
+pas encore faite (adresse à saisir dans les Préférences).
