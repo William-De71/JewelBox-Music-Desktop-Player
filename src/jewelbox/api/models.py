@@ -69,6 +69,9 @@ class Album:
     notes: str | None = None
     cover_url: str | None = None
     has_audio: bool = False
+    # Album de la liste de souhaits : le CD n'est pas possédé, mais ses
+    # fichiers peuvent être là (acheté en MP3) et se lire comme les autres.
+    is_wanted: bool = False
     label: Label | None = None
     # Présent uniquement sur le détail (GET /api/albums/:id) ; vide en liste.
     tracks: tuple[Track, ...] = ()

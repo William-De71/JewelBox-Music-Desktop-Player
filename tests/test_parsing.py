@@ -129,6 +129,12 @@ def test_album_unknown_keys_ignored():
     assert album.id == 1
 
 
+def test_album_wanted_flag():
+    base = {'id': 1, 'title': 'X', 'artist': {'id': 2, 'name': 'Y'}}
+    assert parsing.parse_album(base).is_wanted is False
+    assert parsing.parse_album({**base, 'is_wanted': True}).is_wanted is True
+
+
 def test_album_missing_id_raises():
     with pytest.raises(ParseError):
         parsing.parse_album({'title': 'X', 'artist': {'id': 2, 'name': 'Y'}})

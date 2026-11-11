@@ -604,8 +604,16 @@ class LibraryPage(Gtk.Stack):
             css_classes=['circular', 'jewelbox-cover-play'])
         play.connect('clicked', self._on_card_play_clicked, list_item)
 
+        # Étiquette des albums de la liste de souhaits (écoutables, CD pas
+        # encore possédé), visible selon l'album lié (voir _on_card_bind).
+        wanted = Gtk.Label(
+            label=_('Souhait'), halign=Gtk.Align.START, valign=Gtk.Align.START,
+            margin_start=6, margin_top=6, visible=False,
+            css_classes=['caption-heading', 'jewelbox-cover-wanted'])
+
         overlay = Gtk.Overlay(child=cover, halign=Gtk.Align.CENTER)
         overlay.add_overlay(play)
+        overlay.add_overlay(wanted)
 
         title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END,
                           max_width_chars=18,
@@ -624,6 +632,7 @@ class LibraryPage(Gtk.Stack):
         list_item.cover, list_item.title, list_item.artist = (
             cover, title, artist)
         list_item.play = play
+        list_item.wanted = wanted
 
     def _on_card_bind(self, _factory, list_item):
         album = list_item.get_item().album
@@ -635,6 +644,7 @@ class LibraryPage(Gtk.Stack):
         # par le serveur même en liste (voir Album.has_audio). La cellule
         # étant recyclée, on repositionne la visibilité à chaque bind.
         list_item.play.set_visible(album.has_audio)
+        list_item.wanted.set_visible(album.is_wanted)
 
         cover = list_item.cover
         client = self._app.get_client()

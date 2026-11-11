@@ -105,7 +105,9 @@ class JewelBoxClient:
 
     async def albums(self, page=1, limit=24, sort='artist', order='asc',
                      genre: str | None = None):
-        """Page d'albums possédés (wanted=false exclut la wishlist).
+        """Page d'albums possédés (wanted=false exclut la wishlist), plus ceux
+        de la wishlist qui ont des fichiers audio (playable_wanted, serveur
+        >= 1.27 ; ignoré avant).
 
         Tri artist : le serveur ajoute l'année en clé secondaire, donc un seul
         appel donne l'ordre artiste → date. genre filtre sur un genre exact.
@@ -113,6 +115,7 @@ class JewelBoxClient:
         query = {
             'page': page, 'limit': limit,
             'sort': sort, 'order': order, 'wanted': False,
+            'playable_wanted': True,
         }
         if genre:
             query['genre'] = genre

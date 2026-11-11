@@ -33,6 +33,14 @@
   border-radius: 6px;
 }
 
+/* Étiquette « Souhait » sur la pochette d'un album de la liste de souhaits. */
+.jewelbox-cover-wanted {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+
 /* Bouton « Lire l'album » flottant en surimpression de la pochette : pastille
    pleine à l'accent (bleu par défaut), icône blanche (parité avec le bouton
    play flottant des cartes Android). */

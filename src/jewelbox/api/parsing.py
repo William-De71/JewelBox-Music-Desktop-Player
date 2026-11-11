@@ -148,6 +148,7 @@ def parse_album(data) -> Album:
         notes=_opt_str(data, 'notes'),
         cover_url=_opt_str(data, 'cover_url'),
         has_audio=_bool(data, 'has_audio'),
+        is_wanted=_bool(data, 'is_wanted'),
         label=parse_label(data['label']) if isinstance(data.get('label'), dict) else None,
         tracks=tuple(parse_track(track) for track in _list(data, 'tracks')),
     )
