@@ -214,7 +214,13 @@ class AlbumDetailPage(Gtk.Stack):
         while (row := self._tracks_box.get_row_at_index(0)) is not None:
             self._tracks_box.remove(row)
         self._track_rows = {}
+        # Plusieurs CD : un intertitre « CD n » au-dessus des pistes de chacun.
+        multi_disc = len({track.disc for track in album.tracks}) > 1
+        previous_disc = None
         for track in album.tracks:
+            if multi_disc and track.disc != previous_disc:
+                self._tracks_box.append(self._build_disc_row(track.disc))
+            previous_disc = track.disc
             self._tracks_box.append(self._build_track_row(client, album, track))
 
     async def _load_cover(self, url):
@@ -233,6 +239,13 @@ class AlbumDetailPage(Gtk.Stack):
         self._cover.set_paintable(texture)
 
     # ── Pistes ───────────────────────────────────────────────────────────────
+
+    def _build_disc_row(self, disc):
+        label = Gtk.Label(
+            label=_('CD {n}').format(n=disc), xalign=0,
+            margin_start=12, margin_end=12, margin_top=10, margin_bottom=10,
+            css_classes=['heading', 'dim-label'])
+        return Gtk.ListBoxRow(activatable=False, selectable=False, child=label)
 
     def _build_track_row(self, client, album, track):
         position_label = Gtk.Label(

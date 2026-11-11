@@ -155,6 +155,12 @@ def test_track_float_id_truncated():
     assert track.id == 3
 
 
+def test_track_disc_defaults_to_first():
+    # Serveur < 1.26 : pas de champ disc, un seul CD par album.
+    assert parsing.parse_track({'id': 3, 'title': 'T'}).disc == 1
+    assert parsing.parse_track({'id': 3, 'title': 'T', 'disc': 2}).disc == 2
+
+
 def test_track_missing_title_raises():
     with pytest.raises(ParseError):
         parsing.parse_track({'id': 3})

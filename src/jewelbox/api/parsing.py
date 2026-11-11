@@ -130,6 +130,7 @@ def parse_track(data) -> Track:
         has_file=_bool(data, 'has_file'),
         play_count=_int(data, 'play_count'),
         is_favorite=_bool(data, 'is_favorite'),
+        disc=_int(data, 'disc', 1) or 1,
     )
 
 

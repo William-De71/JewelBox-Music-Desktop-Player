@@ -51,6 +51,9 @@ class Track:
     has_file: bool = False
     play_count: int = 0
     is_favorite: bool = False
+    # Le CD de la piste dans un album qui en compte plusieurs ; 1 sur un
+    # serveur < 1.26, qui ne connaît qu'un CD par album.
+    disc: int = 1
 
 
 @dataclass(frozen=True)
