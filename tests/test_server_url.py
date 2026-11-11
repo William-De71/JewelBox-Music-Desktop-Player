@@ -80,6 +80,11 @@ def test_api_url_bool_becomes_lowercase():
     assert url == 'http://s:3001/api/albums?wanted=false'
 
 
+def test_api_url_booleen_vrai():
+    url = api_url('http://s:3001', '/api/albums', {'playable_wanted': True})
+    assert url == 'http://s:3001/api/albums?playable_wanted=true'
+
+
 def test_api_url_none_values_omitted():
     url = api_url('http://s:3001', '/api/albums', {'page': 2, 'sort': None})
     assert url == 'http://s:3001/api/albums?page=2'

@@ -201,6 +201,7 @@ class AlbumDetailPage(Gtk.Stack):
         self._artist_label.set_label(album.artist.name)
 
         meta = [str(part) for part in (
+            _('Liste de souhaits') if album.is_wanted else None,
             album.year, album.genre,
             album.label.name if album.label else None,
             album.total_duration,
